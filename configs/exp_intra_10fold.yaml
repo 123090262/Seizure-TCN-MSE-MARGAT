@@ -1,0 +1,8 @@
+defaults:
+  - default
+
+experiment:
+  strategy: intra_10fold
+  n_splits: 10
+  val_fraction: 0.1
+  subjects: auto

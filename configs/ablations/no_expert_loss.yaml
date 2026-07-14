@@ -1,0 +1,3 @@
+model:
+  objectives:
+    expert_loss_weight: 0.0

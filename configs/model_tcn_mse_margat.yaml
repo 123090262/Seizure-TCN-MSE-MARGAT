@@ -1,0 +1,51 @@
+model:
+  name: tcn_mse_margat
+  num_classes: 2
+  hidden_dim: 128
+
+  # Strong primary expert. Its residual block family is shared with the TCN baseline.
+  tcn:
+    enabled: true
+    levels: 5
+    kernel_size: 7
+    dropout: 0.20
+
+  # Channel-independent adaptive multi-scale encoder (MSE).
+  mse:
+    enabled: true
+    stem_channels: 32
+    stem_stride: 4
+    kernel_sizes: [7, 15, 31]
+    dilations: [1, 2, 2]
+    dropout: 0.15
+    use_scale_attention: true
+    use_temporal_attention: true
+
+  # Montage-aware residual graph attention over bipolar derivations.
+  margat:
+    enabled: true
+    num_heads: 4
+    num_layers: 2
+    dropout: 0.15
+    structural_bias_init: 1.0
+    non_structural_gate_init: 0.02
+    use_montage: true
+    use_orientation: true
+    use_dynamic_edges: true
+
+  # Zero-initialized correction preserves the TCN decision path at initialization.
+  fusion:
+    mode: safe_residual  # safe_residual | concat
+    gate_init: 0.02
+    dropout: 0.20
+
+  classifier:
+    dropout: 0.30
+
+  objectives:
+    expert_loss_weight: 0.15
+    graph_sparsity_weight: 0.001
+
+training:
+  # Graph score products remain in FP32 for numerical stability.
+  amp: false

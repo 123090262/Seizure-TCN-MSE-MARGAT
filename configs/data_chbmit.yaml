@@ -1,0 +1,37 @@
+defaults:
+  - default
+
+data:
+  dataset: chbmit
+  root: data/CHBMIT
+  processed_dir: data/processed/chbmit
+  metadata_path: data/processed/chbmit/metadata.csv
+  splits_dir: data/splits
+  sampling_rate: 256
+  channel_set: common_18
+
+preprocessing:
+  sampling_rate: 256
+  channel_set: common_18
+  bandpass:
+    enabled: true
+    low: 0.5
+    high: 70.0
+    order: 5
+  notch:
+    enabled: true
+    freq: 60.0
+  artifact_screening:
+    enabled: true
+    amplitude_threshold_uv: 1000
+  save_format: npy
+
+windowing:
+  window_size_samples: 1024
+  window_size_sec: 4.0
+  ictal_overlap: 0.25
+  interictal_overlap: 0.0
+  interictal_exclusion_sec: 3600
+  balance_after_split: true
+  balance_ratio: 1.0
+  balance_sets: [train, val, test]

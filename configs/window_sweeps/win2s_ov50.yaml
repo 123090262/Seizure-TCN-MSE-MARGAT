@@ -1,0 +1,22 @@
+defaults:
+  - ../exp_mixed_5fold
+
+project:
+  output_dir: outputs/window_sweeps/win2s_ov50
+
+data:
+  # Reuse the 4-second experiment's preprocessed signals without duplicating 61 GB.
+  processed_dir: data/processed/chbmit
+  source_metadata_path: data/processed/chbmit/metadata.csv
+  metadata_path: data/window_sweeps/win2s_ov50/metadata.csv
+  window_index_path: data/window_sweeps/win2s_ov50/window_index.csv
+  splits_dir: data/window_sweeps/win2s_ov50/splits
+
+windowing:
+  window_size_samples: 512
+  window_size_sec: 2.0
+  ictal_overlap: 0.50
+  interictal_overlap: 0.50
+
+experiment:
+  output_tag: win2s_ov50

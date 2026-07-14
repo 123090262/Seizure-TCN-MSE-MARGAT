@@ -1,0 +1,15 @@
+defaults:
+  - default
+
+# Apply this overlay to every model in a formal comparison. Model-specific
+# learning rates may still differ, but split/selection/step/tuning budgets do not.
+training:
+  max_optimizer_steps: 10000
+  early_stopping:
+    monitor: val_auroc
+    mode: max
+    patience: 15
+
+comparison:
+  split_manifest: shared
+  tuning_trials_per_model: 20

@@ -1,0 +1,7 @@
+defaults:
+  - default
+
+experiment:
+  strategy: lopo
+  val_subjects: 2
+  subjects: auto

@@ -1,0 +1,3 @@
+model:
+  objectives:
+    graph_sparsity_weight: 0.0

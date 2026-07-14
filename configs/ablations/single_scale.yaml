@@ -1,0 +1,4 @@
+model:
+  mse:
+    kernel_sizes: [15]
+    dilations: [1]

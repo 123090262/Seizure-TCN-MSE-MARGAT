@@ -1,0 +1,6 @@
+model:
+  name: cnn1d
+  num_classes: 2
+  in_channels: 18
+  hidden_channels: 64
+  dropout: 0.2

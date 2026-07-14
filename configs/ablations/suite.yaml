@@ -1,0 +1,84 @@
+reference: full
+experiments:
+  - name: full
+    group: reference
+    config: null
+    tests: Complete TCN-MSE-MARGAT reference.
+
+  - name: tcn_only
+    group: progressive
+    config: configs/ablations/tcn_only.yaml
+    removed_module: mse_and_margat
+    tests: Strong TCN feature-backbone reference inside the proposed model.
+
+  - name: mse_only
+    group: progressive
+    config: configs/ablations/mse_only.yaml
+    removed_module: tcn_and_margat
+    tests: Independent discriminative strength of the multi-scale encoder.
+
+  - name: tcn_mse_no_graph
+    group: progressive
+    config: configs/ablations/tcn_mse_no_graph.yaml
+    removed_module: margat
+    tests: Marginal value of montage-aware graph reasoning beyond TCN plus MSE.
+
+  - name: single_scale
+    group: mse
+    config: configs/ablations/single_scale.yaml
+    removed_module: parallel_multi_scale_branches
+    tests: Multi-scale temporal filters versus one 15-sample branch.
+
+  - name: no_scale_attention
+    group: mse
+    config: configs/ablations/no_scale_attention.yaml
+    removed_module: adaptive_scale_router
+    tests: Learned per-window scale selection versus uniform scale averaging.
+
+  - name: mean_temporal_pool
+    group: mse
+    config: configs/ablations/mean_temporal_pool.yaml
+    removed_module: mse_temporal_attention_pool
+    tests: Attention pooling versus mean temporal pooling in MSE.
+
+  - name: no_montage
+    group: margat
+    config: configs/ablations/no_montage.yaml
+    removed_module: bipolar_montage_line_graph
+    tests: Value of shared-electrode structural topology.
+
+  - name: no_orientation
+    group: margat
+    config: configs/ablations/no_orientation.yaml
+    removed_module: signed_derivation_orientation
+    tests: Value of bipolar derivation direction signs.
+
+  - name: no_dynamic_edges
+    group: margat
+    config: configs/ablations/no_dynamic_edges.yaml
+    removed_module: non_structural_dynamic_edges
+    tests: Structural montage graph alone versus gated dynamic residual edges.
+
+  - name: one_graph_layer
+    group: margat
+    config: configs/ablations/one_graph_layer.yaml
+    removed_module: second_margat_layer
+    tests: Whether deeper graph propagation helps or over-smooths.
+
+  - name: no_graph_sparsity
+    group: margat
+    config: configs/ablations/no_graph_sparsity.yaml
+    removed_module: dynamic_edge_sparsity_regularizer
+    tests: Whether sparse non-structural gates improve generalization.
+
+  - name: concat_fusion
+    group: fusion
+    config: configs/ablations/concat_fusion.yaml
+    removed_module: safe_zero_initialized_residual_fusion
+    tests: Safe residual correction versus unconstrained concatenation.
+
+  - name: no_expert_loss
+    group: optimization
+    config: configs/ablations/no_expert_loss.yaml
+    removed_module: auxiliary_expert_supervision
+    tests: Whether independently supervised experts improve the final ensemble.

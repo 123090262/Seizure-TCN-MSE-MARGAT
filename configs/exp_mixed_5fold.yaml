@@ -1,0 +1,8 @@
+defaults:
+  - default
+
+experiment:
+  strategy: mixed_5fold
+  n_splits: 5
+  val_fraction: 0.1
+  subjects: pooled

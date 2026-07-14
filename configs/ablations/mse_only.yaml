@@ -1,0 +1,7 @@
+model:
+  tcn:
+    enabled: false
+  mse:
+    enabled: true
+  margat:
+    enabled: false

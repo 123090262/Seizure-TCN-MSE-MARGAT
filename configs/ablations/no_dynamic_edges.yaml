@@ -1,0 +1,3 @@
+model:
+  margat:
+    use_dynamic_edges: false
