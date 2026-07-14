@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, WeightedRandomSampler
 
-from src.data.normalization import ZScoreNormalizer
+from src.data.normalization import Normalizer
 from src.utils.io import load_array
 
 
@@ -16,7 +16,7 @@ class EEGWindowDataset(Dataset[dict[str, Any]]):
     def __init__(
         self,
         windows: list[dict[str, Any]],
-        normalizer: ZScoreNormalizer | None = None,
+        normalizer: Normalizer | None = None,
         channels: list[str] | None = None,
         cache: bool = False,
     ) -> None:
@@ -42,7 +42,7 @@ class EEGWindowDataset(Dataset[dict[str, Any]]):
         data = self._load_record(str(item["data_path"]))
         x = data[:, int(item["start_sample"]): int(item["end_sample"])].astype(np.float32)
         if self.normalizer is not None:
-            x = self.normalizer.transform(x)
+            x = self.normalizer.transform(x, subject_id=str(item["subject_id"]))
         return {
             "x": torch.from_numpy(x),
             "y": torch.tensor(int(item["label"]), dtype=torch.long),

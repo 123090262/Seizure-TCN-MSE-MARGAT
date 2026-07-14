@@ -60,6 +60,13 @@ def summarize_fold_reports(
         "metrics": metrics,
         "confusion_matrix_sum": confusion_matrix_sum,
     }
+    normalization_scopes = {
+        str(report["normalization_scope"])
+        for report in reports
+        if "normalization_scope" in report
+    }
+    if len(normalization_scopes) == 1:
+        summary["normalization_scope"] = normalization_scopes.pop()
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     write_json(summary, output_path / "summary.json")

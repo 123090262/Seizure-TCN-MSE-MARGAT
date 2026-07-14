@@ -1,0 +1,18 @@
+defaults:
+  - ../exp_mixed_5fold
+
+project:
+  output_dir: outputs/normalization/subject_global/win4s_baseline
+
+normalization:
+  method: zscore
+  scope: subject_global
+  per_channel: true
+  eps: 1.0e-6
+  metadata_path: data/processed/chbmit/metadata.csv
+  stats_path: data/normalization/subject_global/chbmit_common18_stats.json
+
+experiment:
+  branch_name: 全局归一化
+  window_tag: win4s_baseline
+  output_tag: subject_global_win4s_baseline

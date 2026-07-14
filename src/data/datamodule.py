@@ -5,7 +5,7 @@ from typing import Any
 from torch.utils.data import DataLoader
 
 from src.data.datasets import EEGWindowDataset, make_balanced_sampler
-from src.data.normalization import ZScoreNormalizer
+from src.data.normalization import Normalizer, build_normalizer
 
 
 def resolve_balance_strategy(cfg: Any) -> str:
@@ -32,17 +32,13 @@ def build_dataloaders(
     split: dict[str, Any],
     cfg: Any,
     channels: list[str] | None = None,
-    normalizer: ZScoreNormalizer | None = None,
+    normalizer: Normalizer | None = None,
 ) -> dict[str, DataLoader]:
     train_windows = list(split["train_windows"])
     val_windows = list(split["val_windows"])
     test_windows = list(split["test_windows"])
     if normalizer is None:
-        normalizer = ZScoreNormalizer.fit(
-            train_windows,
-            eps=float(cfg.normalization.eps),
-            channel_names=channels,
-        )
+        normalizer = build_normalizer(split, cfg, channel_names=channels)
     batch_size = int(cfg.training.batch_size)
     num_workers = int(cfg.training.num_workers)
     train_dataset = EEGWindowDataset(train_windows, normalizer=normalizer, channels=channels, cache=True)

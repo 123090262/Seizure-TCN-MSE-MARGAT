@@ -1,0 +1,17 @@
+defaults:
+  - ../window_sweeps/win2s_ov50
+
+project:
+  output_dir: outputs/normalization/subject_global/win2s_ov50
+
+normalization:
+  method: zscore
+  scope: subject_global
+  per_channel: true
+  eps: 1.0e-6
+  metadata_path: data/processed/chbmit/metadata.csv
+  stats_path: data/normalization/subject_global/chbmit_common18_stats.json
+
+experiment:
+  branch_name: 全局归一化
+  output_tag: subject_global_win2s_ov50

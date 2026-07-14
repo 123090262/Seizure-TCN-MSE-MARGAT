@@ -8,7 +8,7 @@ import pandas as pd
 
 from src.data.chbmit_reader import get_channel_set
 from src.data.datamodule import build_dataloaders
-from src.data.normalization import ZScoreNormalizer
+from src.data.normalization import build_normalizer
 from src.models.factory import build_model
 from src.training.trainer import Trainer
 from src.utils.config import load_config, save_config
@@ -46,7 +46,7 @@ def main() -> None:
     write_json(split, output_dir / "split.json")
 
     channels = get_channel_set(str(cfg.data.channel_set), list(cfg.data.custom_channels or []))
-    normalizer = ZScoreNormalizer.fit(split["train_windows"], eps=float(cfg.normalization.eps), channel_names=channels)
+    normalizer = build_normalizer(split, cfg, channel_names=channels)
     normalizer.save(output_dir / "normalization_stats.json")
 
     loaders = build_dataloaders(split, cfg, channels=channels, normalizer=normalizer)

@@ -173,6 +173,7 @@ class Trainer:
             "learning_rate": initial_lr,
             "early_stopping_monitor": str(self.cfg.training.early_stopping.monitor),
             "balance_strategy": self.balance_strategy,
+            "normalization_scope": str(self.cfg.normalization.scope),
             "class_weights": self.resolved_class_weights.detach().cpu().tolist() if self.resolved_class_weights is not None else None,
             **self._model_graph_report(),
             "history": history,

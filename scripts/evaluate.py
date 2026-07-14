@@ -6,11 +6,9 @@ import shutil
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
-import numpy as np
-
 from src.data.chbmit_reader import get_channel_set
 from src.data.datamodule import build_dataloaders
-from src.data.normalization import ZScoreNormalizer
+from src.data.normalization import load_normalizer
 from src.evaluation.fold_report import summarize_fold_reports
 from src.evaluation.metrics import binary_metrics, parameter_count
 from src.models.factory import build_model
@@ -39,12 +37,9 @@ def main() -> None:
     for fold_dir in fold_dirs:
         cfg = load_config(fold_dir / "config.yaml")
         split = read_json(fold_dir / "split.json")
-        stats = read_json(fold_dir / "normalization_stats.json")
-        normalizer = ZScoreNormalizer(
-            mean=np.asarray(stats["mean"], dtype=np.float32),
-            std=np.asarray(stats["std"], dtype=np.float32),
-            eps=float(stats.get("eps", cfg.normalization.eps)),
-            channel_names=list(stats.get("channel_names", [])) or None,
+        normalizer = load_normalizer(
+            fold_dir / "normalization_stats.json",
+            default_eps=float(cfg.normalization.eps),
         )
         channels = get_channel_set(str(cfg.data.channel_set), list(cfg.data.custom_channels or []))
         loaders = build_dataloaders(split, cfg, channels=channels, normalizer=normalizer)

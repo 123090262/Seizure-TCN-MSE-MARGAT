@@ -198,6 +198,37 @@ Each trained run stores a `run_manifest.json`, the fully resolved fold config,
 and a partition-tagged microsecond timestamp. This prevents the 1s, 2s, and
 existing 4s outputs from being mixed or overwritten.
 
+## Subject-global normalization branch
+
+The **全局归一化** branch compares the default fold-specific train-only Z-score
+with per-subject global Z-score statistics. For each subject, the new branch
+computes per-channel mean and standard deviation from all of that subject's
+preprocessed continuous EEG records. It then uses the subject's own statistics
+for train, validation, and test windows. All model, split, training, and
+evaluation settings remain inherited from `exp_mixed_5fold.yaml`.
+
+```bash
+python scripts/run_mixed_5fold.py \
+  --config configs/normalization/subject_global.yaml \
+  --model_config configs/model_tcn_mse_margat.yaml
+```
+
+The first fold creates and caches subject statistics under
+`data/normalization/subject_global/`; later folds reuse the exact cache. Results
+are isolated under `outputs/normalization/subject_global/` and use a
+`subject_global_<timestamp>` run name. This experiment is intentionally
+transductive because unlabeled test-subject signals contribute normalization
+statistics; it is not a train-only generalization protocol.
+
+The same branch provides three directly comparable configs for both full-model
+training and the unchanged 14-variant ablation suite:
+
+```text
+configs/normalization/subject_global.yaml
+configs/normalization/subject_global_win1s_ov50.yaml
+configs/normalization/subject_global_win2s_ov50.yaml
+```
+
 ## Tests
 
 ```bash
