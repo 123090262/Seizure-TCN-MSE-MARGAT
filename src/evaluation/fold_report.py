@@ -22,6 +22,11 @@ TEST_METRIC_KEYS = (
     "auprc",
 )
 
+OPTIONAL_FOLD_METRIC_KEYS = (
+    "fixed_threshold_accuracy",
+    "decision_threshold",
+)
+
 
 def save_fold_report(metrics: dict[str, Any], path: str | Path) -> None:
     write_json(metrics, path)
@@ -44,7 +49,9 @@ def summarize_fold_reports(
     reports = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
     rows = []
     metrics: dict[str, dict[str, float]] = {}
-    for key in TEST_METRIC_KEYS:
+    metric_keys = list(TEST_METRIC_KEYS)
+    metric_keys.extend(key for key in OPTIONAL_FOLD_METRIC_KEYS if all(key in report for report in reports))
+    for key in metric_keys:
         values = np.asarray([float(report[key]) for report in reports], dtype=float)
         mean = float(np.mean(values))
         std = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0

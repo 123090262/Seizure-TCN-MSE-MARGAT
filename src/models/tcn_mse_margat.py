@@ -13,18 +13,44 @@ from src.models.graph.margat import MontageAwareResidualGAT
 class TCNFeatureBackbone(nn.Module):
     """The same temporal block family as the TCN baseline, exposed as features."""
 
-    def __init__(self, in_channels: int, hidden_dim: int, levels: int, kernel_size: int, dropout: float) -> None:
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_dim: int,
+        levels: int,
+        kernel_size: int,
+        dropout: float,
+        pooling: str = "attention",
+    ) -> None:
         super().__init__()
+        self.pooling = pooling.lower()
+        if self.pooling not in {"attention", "attention_stats"}:
+            raise ValueError("model.tcn.pooling must be attention or attention_stats")
         self.proj = nn.Conv1d(in_channels, hidden_dim, kernel_size=1)
         self.blocks = nn.Sequential(
             *[TemporalBlock(hidden_dim, kernel_size, 2**level, dropout) for level in range(levels)]
         )
         self.pool_score = nn.Conv1d(hidden_dim, 1, kernel_size=1)
+        self.pool_fusion = (
+            nn.Sequential(
+                nn.Linear(hidden_dim * 3, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.GELU(),
+                nn.Dropout(dropout),
+            )
+            if self.pooling == "attention_stats"
+            else None
+        )
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         sequence = self.blocks(self.proj(x))
         weights = torch.softmax(self.pool_score(sequence), dim=-1)
-        return torch.sum(weights * sequence, dim=-1), sequence
+        attended = torch.sum(weights * sequence, dim=-1)
+        if self.pool_fusion is None:
+            return attended, sequence
+        mean = sequence.mean(dim=-1)
+        std = torch.sqrt(sequence.var(dim=-1, unbiased=False) + 1.0e-6)
+        return self.pool_fusion(torch.cat([attended, mean, std], dim=-1)), sequence
 
 
 class SafeResidualExpertFusion(nn.Module):
@@ -70,6 +96,50 @@ class DirectConcatFusion(nn.Module):
         return fused, torch.ones_like(fused), fused - tcn
 
 
+class EvidenceLogitFusion(nn.Module):
+    """Validation-friendly mixture of the fused classifier and expert heads.
+
+    The old architecture trained expert heads only through an auxiliary loss.
+    This layer lets their evidence directly affect the final prediction while a
+    zero-initialized router starts from an explicit, conservative prior.
+    """
+
+    def __init__(self, dim: int, prior_weights: list[float], dropout: float) -> None:
+        super().__init__()
+        if len(prior_weights) < 2 or any(weight <= 0 for weight in prior_weights):
+            raise ValueError("fusion.logit_fusion.prior_weights must contain at least two positive values")
+        prior = torch.tensor(prior_weights, dtype=torch.float32)
+        prior = prior / prior.sum()
+        self.register_buffer("log_prior", torch.log(prior))
+        self.router = nn.Sequential(
+            nn.LayerNorm(dim * len(prior_weights)),
+            nn.Dropout(dropout),
+            nn.Linear(dim * len(prior_weights), len(prior_weights)),
+        )
+        nn.init.zeros_(self.router[-1].weight)
+        nn.init.zeros_(self.router[-1].bias)
+        self.log_temperatures = nn.Parameter(torch.zeros(len(prior_weights)))
+
+    def forward(
+        self,
+        embeddings: list[torch.Tensor],
+        logits: list[torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if len(embeddings) != len(logits) or len(logits) != self.log_prior.numel():
+            raise ValueError("Evidence fusion inputs do not match configured expert prior")
+        route_delta = self.router(torch.cat(embeddings, dim=-1))
+        weights = torch.softmax(self.log_prior + route_delta, dim=-1)
+        temperatures = self.log_temperatures.exp().clamp(0.5, 2.0)
+        stacked = torch.stack(logits, dim=1) / temperatures[None, :, None]
+        return torch.sum(weights[..., None] * stacked, dim=1), weights
+
+    def prior_weights(self) -> list[float]:
+        return torch.softmax(self.log_prior, dim=0).detach().cpu().tolist()
+
+    def temperatures(self) -> list[float]:
+        return self.log_temperatures.exp().clamp(0.5, 2.0).detach().cpu().tolist()
+
+
 class TCNMSEMARGAT(nn.Module):
     """TCN + adaptive multi-scale encoder + montage-aware residual GAT."""
 
@@ -91,6 +161,7 @@ class TCNMSEMARGAT(nn.Module):
             int(mcfg.tcn.levels),
             int(mcfg.tcn.kernel_size),
             float(mcfg.tcn.dropout),
+            str(mcfg.tcn.get("pooling", "attention")),
         ) if self.tcn_enabled else None
         self.mse = AdaptiveMultiScaleEncoder(
             stem_channels=int(mcfg.mse.stem_channels),
@@ -129,6 +200,23 @@ class TCNMSEMARGAT(nn.Module):
         self.tcn_expert = nn.Linear(dim, int(mcfg.num_classes)) if self.tcn_enabled else None
         self.scale_expert = nn.Linear(dim, int(mcfg.num_classes)) if self.mse_enabled else None
         self.graph_expert = nn.Linear(dim, int(mcfg.num_classes)) if self.margat_enabled else None
+        logit_fusion_cfg = mcfg.fusion.get("logit_fusion", {})
+        logit_fusion_enabled = bool(logit_fusion_cfg.get("enabled", False)) if hasattr(logit_fusion_cfg, "get") else False
+        expert_count = 1 + int(self.tcn_enabled) + int(self.mse_enabled) + int(self.margat_enabled)
+        self.logit_fusion = (
+            EvidenceLogitFusion(
+                dim,
+                list(logit_fusion_cfg.get("prior_weights", [])),
+                float(logit_fusion_cfg.get("dropout", mcfg.fusion.dropout)),
+            )
+            if logit_fusion_enabled
+            else None
+        )
+        if self.logit_fusion is not None and self.logit_fusion.log_prior.numel() != expert_count:
+            raise ValueError(
+                f"fusion.logit_fusion.prior_weights has {self.logit_fusion.log_prior.numel()} entries; "
+                f"the enabled fused/expert paths require {expert_count}"
+            )
         self.graph_sparsity_weight = float(mcfg.objectives.graph_sparsity_weight)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, Any]]:
@@ -163,20 +251,36 @@ class TCNMSEMARGAT(nn.Module):
             fused = graph_embedding
 
         expert_logits = []
+        expert_embeddings = []
         if self.tcn_expert is not None and tcn_embedding is not None:
             expert_logits.append(self.tcn_expert(tcn_embedding))
+            expert_embeddings.append(tcn_embedding)
         if self.scale_expert is not None and scale_embedding is not None:
             expert_logits.append(self.scale_expert(scale_embedding))
+            expert_embeddings.append(scale_embedding)
         if self.graph_expert is not None and graph_embedding is not None:
             expert_logits.append(self.graph_expert(graph_embedding))
+            expert_embeddings.append(graph_embedding)
         aux["expert_logits"] = expert_logits
         if "dynamic_gate_mean" in aux:
             aux["regularization_loss"] = self.graph_sparsity_weight * aux["dynamic_gate_mean"]
-        return self.classifier(fused), aux
+        fused_logits = self.classifier(fused)
+        if self.logit_fusion is not None:
+            fused_logits, evidence_weights = self.logit_fusion(
+                [fused, *expert_embeddings],
+                [fused_logits, *expert_logits],
+            )
+            aux["evidence_weights"] = evidence_weights
+        return fused_logits, aux
 
     def diagnostics(self) -> dict[str, Any]:
-        return {
+        report = {
             "tcn_enabled": self.tcn_enabled,
             "mse_enabled": self.mse_enabled,
             "margat_enabled": self.margat_enabled,
+            "logit_fusion_enabled": self.logit_fusion is not None,
         }
+        if self.logit_fusion is not None:
+            report["logit_fusion_prior_weights"] = self.logit_fusion.prior_weights()
+            report["logit_fusion_temperatures"] = self.logit_fusion.temperatures()
+        return report

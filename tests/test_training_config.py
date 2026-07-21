@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader, Dataset, RandomSampler, WeightedRandomS
 
 from src.data.datamodule import build_dataloaders, resolve_balance_strategy
 from src.models.tcn_mse_margat import TCNMSEMARGAT
+from src.evaluation.metrics import select_binary_threshold
 from src.training.losses import build_loss, inverse_frequency_class_weights
 from src.training.trainer import Trainer
 from src.utils.config import load_config
@@ -46,6 +47,16 @@ def test_class_weights_are_training_only_multiclass_and_missing_safe() -> None:
         inverse_frequency_class_weights([], 2)
     with pytest.raises(ValueError, match="cross_entropy"):
         build_loss(name="silently_ignored_loss")
+    with pytest.raises(ValueError, match="label_smoothing"):
+        build_loss(label_smoothing=1.0)
+
+
+def test_validation_threshold_selection_improves_accuracy_without_test_labels() -> None:
+    y_true = torch.tensor([0, 0, 1, 1]).numpy()
+    y_prob = torch.tensor([0.10, 0.45, 0.46, 0.90]).numpy()
+    threshold = select_binary_threshold(y_true, y_prob)
+    assert threshold == pytest.approx(0.46)
+    assert ((y_prob >= threshold).astype(int) == y_true).mean() == 1.0
 
 
 def test_legacy_class_weight_migration_and_conflict() -> None:

@@ -1,0 +1,7 @@
+defaults:
+  - model_tcn_mse_margat_v2
+
+model:
+  tcn:
+    # RF=181 samples (0.71 s); avoids padding-dominated level 5 on 1 s input.
+    levels: 4

@@ -16,9 +16,9 @@ def build_model(
     channel_names: list[str] | None = None,
 ) -> torch.nn.Module:
     name = str(cfg.model.name).lower()
-    if name == "tcn_mse_margat":
+    if name in {"tcn_mse_margat", "tcn_mse_margat_v2"}:
         if channel_names is None:
-            raise ValueError("tcn_mse_margat requires ordered bipolar channel names")
+            raise ValueError(f"{name} requires ordered bipolar channel names")
         return TCNMSEMARGAT(cfg, num_channels=num_channels, channel_names=channel_names)
     if name == "cnn1d":
         return CNN1DBaseline(in_channels=num_channels, num_classes=int(cfg.model.num_classes))

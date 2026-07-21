@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from src.evaluation.metrics import binary_metrics, parameter_count
+from src.evaluation.metrics import binary_metrics, parameter_count, select_binary_threshold
 from src.data.datamodule import resolve_balance_strategy
 from src.training.callbacks import load_checkpoint, save_checkpoint
 from src.training.early_stopping import EarlyStopping
@@ -26,7 +26,8 @@ class Trainer:
         self.optimizer = build_optimizer(model, cfg)
         self.scheduler = build_scheduler(self.optimizer, cfg)
         self.loss_name = str(cfg.training.loss.name)
-        self.criterion = build_loss(name=self.loss_name)
+        self.label_smoothing = float(cfg.training.loss.get("label_smoothing", 0.0))
+        self.criterion = build_loss(name=self.loss_name, label_smoothing=self.label_smoothing)
         self.balance_strategy = resolve_balance_strategy(cfg)
         objectives = cfg.model.get("objectives", {}) if hasattr(cfg.model, "get") else {}
         self.expert_loss_weight = float(objectives.get("expert_loss_weight", 0.0)) if hasattr(objectives, "get") else 0.0
@@ -88,14 +89,27 @@ class Trainer:
     def _configure_training_loss(self, loader: DataLoader) -> None:
         if self.balance_strategy != "class_weight":
             self.resolved_class_weights = None
-            self.criterion = build_loss(name=self.loss_name)
+            self.criterion = build_loss(name=self.loss_name, label_smoothing=self.label_smoothing)
             return
         windows = getattr(loader.dataset, "windows", None)
         if windows is None:
             raise ValueError("class_weight strategy requires a training dataset exposing training windows")
         labels = [int(window["label"]) for window in windows]
         self.resolved_class_weights = inverse_frequency_class_weights(labels, int(self.cfg.model.num_classes)).to(self.device)
-        self.criterion = build_loss(self.resolved_class_weights, name=self.loss_name)
+        self.criterion = build_loss(
+            self.resolved_class_weights,
+            name=self.loss_name,
+            label_smoothing=self.label_smoothing,
+        )
+
+    def select_decision_threshold(self, y_true: np.ndarray, y_prob: np.ndarray) -> tuple[float, str]:
+        configured = float(self.cfg.evaluation.threshold)
+        method = str(self.cfg.evaluation.get("threshold_selection", "fixed")).lower()
+        if method == "fixed":
+            return configured, method
+        if method == "validation_accuracy":
+            return select_binary_threshold(y_true, y_prob, objective="accuracy", default=configured), method
+        raise ValueError("evaluation.threshold_selection must be fixed or validation_accuracy")
 
     def _model_graph_report(self) -> dict[str, Any]:
         diagnostics = getattr(self.model, "diagnostics", None)
@@ -158,8 +172,16 @@ class Trainer:
         if best_epoch < 0:
             raise RuntimeError("Training completed without producing a best checkpoint.")
         load_checkpoint(self.output_dir / "best.pt", self.model, map_location=self.device)
+        _, threshold_y, threshold_p = self._run_epoch(loaders["val"], train=False)
+        decision_threshold, threshold_selection = self.select_decision_threshold(threshold_y, threshold_p)
+        threshold_validation_metrics = (
+            binary_metrics(threshold_y, threshold_p, threshold=decision_threshold) if len(threshold_y) else {}
+        )
         test_loss, test_y, test_p = self._run_epoch(loaders["test"], train=False)
-        test_metrics = binary_metrics(test_y, test_p, threshold=float(self.cfg.evaluation.threshold)) if len(test_y) else {}
+        test_metrics = binary_metrics(test_y, test_p, threshold=decision_threshold) if len(test_y) else {}
+        fixed_test_metrics = (
+            binary_metrics(test_y, test_p, threshold=float(self.cfg.evaluation.threshold)) if len(test_y) else {}
+        )
         initial_lr = float(self.cfg.training.lr)
         return {
             "best_epoch": best_epoch,
@@ -172,6 +194,14 @@ class Trainer:
             "effective_batch_size": int(self.cfg.training.batch_size),
             "learning_rate": initial_lr,
             "early_stopping_monitor": str(self.cfg.training.early_stopping.monitor),
+            "decision_threshold": decision_threshold,
+            "threshold_selection": threshold_selection,
+            "threshold_validation_accuracy": threshold_validation_metrics.get("accuracy"),
+            **{
+                f"fixed_threshold_{key}": value
+                for key, value in fixed_test_metrics.items()
+                if isinstance(value, float)
+            },
             "balance_strategy": self.balance_strategy,
             "normalization_scope": str(self.cfg.normalization.scope),
             "class_weights": self.resolved_class_weights.detach().cpu().tolist() if self.resolved_class_weights is not None else None,

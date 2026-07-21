@@ -53,8 +53,12 @@ def main() -> None:
 
         # Reuse the exact evaluation loop and metric implementation used during training.
         trainer = Trainer(model, cfg, device, fold_dir)
+        _, val_y, val_p = trainer._run_epoch(loaders["val"], train=False)
+        decision_threshold, threshold_selection = trainer.select_decision_threshold(val_y, val_p)
+        threshold_validation_metrics = binary_metrics(val_y, val_p, threshold=decision_threshold)
         test_loss, test_y, test_p = trainer._run_epoch(loaders["test"], train=False)
-        test_metrics = binary_metrics(test_y, test_p, threshold=float(cfg.evaluation.threshold))
+        test_metrics = binary_metrics(test_y, test_p, threshold=decision_threshold)
+        fixed_test_metrics = binary_metrics(test_y, test_p, threshold=float(cfg.evaluation.threshold))
 
         report_path = fold_dir / "report.json"
         old_report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
@@ -67,6 +71,14 @@ def main() -> None:
             "best_metrics": checkpoint.get("metrics", old_report.get("best_metrics", {})),
             "test_loss": test_loss,
             **test_metrics,
+            "decision_threshold": decision_threshold,
+            "threshold_selection": threshold_selection,
+            "threshold_validation_accuracy": threshold_validation_metrics["accuracy"],
+            **{
+                f"fixed_threshold_{key}": value
+                for key, value in fixed_test_metrics.items()
+                if isinstance(value, float)
+            },
             "parameter_count": parameter_count(model),
             "evaluation_checkpoint": "best.pt",
         }

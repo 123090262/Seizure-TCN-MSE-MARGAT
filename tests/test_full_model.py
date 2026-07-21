@@ -59,3 +59,24 @@ def test_progressive_ablation_is_structurally_clean() -> None:
     )
     assert no_graph.tcn is not None and no_graph.mse is not None
     assert no_graph.margat is None and no_graph.fusion is not None
+
+
+@pytest.mark.parametrize(
+    ("config_path", "samples", "levels"),
+    [
+        ("configs/model_tcn_mse_margat_v2_win1s.yaml", 256, 4),
+        ("configs/model_tcn_mse_margat_v2_win2s.yaml", 512, 5),
+        ("configs/model_tcn_mse_margat_v2_win4s.yaml", 1024, 6),
+    ],
+)
+def test_v2_window_specific_models_route_all_expert_logits(config_path, samples, levels) -> None:
+    cfg = load_config("configs/default.yaml", config_path)
+    model = TCNMSEMARGAT(cfg, num_channels=18, channel_names=CHANNELS)
+    assert len(model.tcn.blocks) == levels
+    assert model.logit_fusion is not None
+    with torch.no_grad():
+        logits, aux = model(torch.randn(2, 18, samples))
+    assert logits.shape == (2, 2)
+    assert aux["evidence_weights"].shape == (2, 4)
+    assert aux["evidence_weights"].sum(dim=1).tolist() == pytest.approx([1.0, 1.0])
+    assert aux["evidence_weights"].mean(dim=0).tolist() == pytest.approx([0.55, 0.25, 0.15, 0.05])

@@ -1,0 +1,39 @@
+defaults:
+  - model_tcn_mse_margat
+
+model:
+  # A separate model name keeps V2 outputs isolated from the original model.
+  name: tcn_mse_margat_v2
+
+  tcn:
+    dropout: 0.25
+    pooling: attention_stats
+
+  fusion:
+    mode: safe_residual
+    gate_init: 0.10
+    dropout: 0.25
+    logit_fusion:
+      enabled: true
+      # fused classifier, TCN expert, MSE expert, MARGAT expert
+      prior_weights: [0.55, 0.25, 0.15, 0.05]
+      dropout: 0.15
+
+  classifier:
+    dropout: 0.40
+
+  objectives:
+    expert_loss_weight: 0.20
+
+training:
+  weight_decay: 1.0e-3
+  early_stopping:
+    monitor: val_auroc
+    mode: max
+    patience: 15
+  loss:
+    label_smoothing: 0.05
+
+evaluation:
+  # Selected independently in each fold using that fold's validation set only.
+  threshold_selection: validation_accuracy

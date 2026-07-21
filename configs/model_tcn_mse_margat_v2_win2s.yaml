@@ -1,0 +1,7 @@
+defaults:
+  - model_tcn_mse_margat_v2
+
+model:
+  tcn:
+    # RF=373 samples (1.46 s), matching the useful context of a 2 s window.
+    levels: 5

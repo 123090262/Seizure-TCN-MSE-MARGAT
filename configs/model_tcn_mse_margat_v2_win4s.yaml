@@ -1,0 +1,7 @@
+defaults:
+  - model_tcn_mse_margat_v2
+
+model:
+  tcn:
+    # RF=757 samples (2.96 s); the old five-level TCN saw only 1.46 s.
+    levels: 6

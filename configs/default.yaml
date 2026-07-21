@@ -64,9 +64,11 @@ training:
     patience: 10
   loss:
     name: cross_entropy
+    label_smoothing: 0.0
   amp: true
   grad_clip: 5.0
   logger: tensorboard
 
 evaluation:
   threshold: 0.5
+  threshold_selection: fixed  # fixed | validation_accuracy

@@ -20,7 +20,13 @@ def inverse_frequency_class_weights(labels: list[int], num_classes: int) -> torc
     return weights
 
 
-def build_loss(class_weight: torch.Tensor | None = None, name: str = "cross_entropy") -> nn.Module:
+def build_loss(
+    class_weight: torch.Tensor | None = None,
+    name: str = "cross_entropy",
+    label_smoothing: float = 0.0,
+) -> nn.Module:
     if str(name).lower() != "cross_entropy":
         raise ValueError("training.loss.name currently supports only 'cross_entropy'")
-    return nn.CrossEntropyLoss(weight=class_weight)
+    if not 0.0 <= label_smoothing < 1.0:
+        raise ValueError("training.loss.label_smoothing must lie in [0,1)")
+    return nn.CrossEntropyLoss(weight=class_weight, label_smoothing=label_smoothing)
