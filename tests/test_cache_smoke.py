@@ -78,6 +78,31 @@ def test_in_memory_dataset_matches_mmap_values_and_split_order(
         assert actual_label.item() == expected_label.item()
 
 
+def test_create_dataloaders_uses_zero_worker_memory_cache(tmp_path: Path) -> None:
+    config = _indexed_cache_config(tmp_path)
+    config["train"]["cache_in_memory"] = True
+
+    loaders = create_dataloaders(config, 0)
+
+    assert all(loader.num_workers == 0 for loader in loaders.values())
+    assert all(
+        isinstance(loader.dataset, InMemoryEEGWindowDataset)
+        for loader in loaders.values()
+    )
+    inputs, labels = next(iter(loaders["train"]))
+    assert inputs.dtype == torch.float32
+    assert labels.dtype == torch.long
+
+
+def test_create_dataloaders_defaults_to_mmap_dataset(tmp_path: Path) -> None:
+    config = _indexed_cache_config(tmp_path)
+
+    loaders = create_dataloaders(config, 0)
+
+    assert isinstance(loaders["train"].dataset, EEGWindowDataset)
+    assert loaders["train"].num_workers == 2
+
+
 def test_window_cache_and_loader_use_shared_continuous_record(tmp_path: Path) -> None:
     prepared = tmp_path / "prepared"
     records = prepared / "records"

@@ -1,0 +1,55 @@
+seed: 42
+
+data:
+  raw_dir: /workspace/data/public/Epilepsy/CHB-MIT
+  prepared_dir: /workspace/output/prepared
+  sample_rate: 256
+  channels:
+    - FP1-F7
+    - F7-T7
+    - T7-P7
+    - P7-O1
+    - FP1-F3
+    - F3-C3
+    - C3-P3
+    - P3-O1
+    - FP2-F4
+    - F4-C4
+    - C4-P4
+    - P4-O2
+    - FP2-F8
+    - F8-T8
+    - T8-P8
+    - P8-O2
+    - FZ-CZ
+    - CZ-PZ
+  bandpass_hz: [0.5, 70.0]
+  notch_hz: 60.0
+  seizure_overlap: 0.75
+  min_seizure_overlap: 0.5
+  safety_margin_seconds: 30.0
+  artifact_uv: 1000.0
+  constant_std_uv: 0.1
+
+split:
+  folds: 10
+  val_fraction: 0.1
+  balance_ratio: 1.0
+
+model:
+  hidden: 128
+  node_dim: 128
+  heads: 4
+  dropout: 0.2
+
+train:
+  output_dir: /workspace/output/runs
+  device: cuda
+  amp: true
+  batch_size: 64
+  cache_in_memory: true
+  num_workers: 4
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  epochs: 30
+  patience: 6

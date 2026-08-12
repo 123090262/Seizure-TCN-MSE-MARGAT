@@ -490,17 +490,24 @@ def create_dataloaders(
     )
     split_dir.mkdir(parents=True, exist_ok=True)
     np.savez(split_dir / f"{split_id}.npz", **split)
-    workers = int(config["train"]["num_workers"])
+    cache_in_memory = bool(config["train"].get("cache_in_memory", False))
+    workers = 0 if cache_in_memory else int(config["train"]["num_workers"])
+    datasets: dict[str, Dataset] = {}
+    for name, indices in split.items():
+        source = EEGWindowDataset(config, indices)
+        datasets[name] = (
+            InMemoryEEGWindowDataset(source, name) if cache_in_memory else source
+        )
     return {
         name: DataLoader(
-            EEGWindowDataset(config, indices),
+            dataset,
             batch_size=config["train"]["batch_size"],
             shuffle=name == "train",
             num_workers=workers,
             pin_memory=config["train"]["device"] == "cuda",
             persistent_workers=workers > 0,
         )
-        for name, indices in split.items()
+        for name, dataset in datasets.items()
     }
 
 
