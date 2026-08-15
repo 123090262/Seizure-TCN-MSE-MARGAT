@@ -27,15 +27,23 @@ window-level protocol and must be reported separately. New LOPO runs use newly
 rebuilt 24-case artifacts and must not share split files with the prior mixed
 runs.
 
+To make this isolation enforceable, `configs/lopo.yaml` enables a dedicated
+`data.merge_chb17: true` switch and overrides `data.prepared_dir` with
+`/workspace/output/prepared_lopo_24case`. The base and mixed configurations do
+not enable this switch, so rebuilding mixed artifacts retains the current
+26-ID identity and normalization behavior.
+
 ## Design
 
 ### Canonical case identity
 
 Add one small function in `src/data.py` that extracts a CHB-MIT case ID from an
-EDF stem. It accepts ordinary stems such as `chb01_03` and the CHB17 stems
-`chb17a_03`, `chb17b_57`, and `chb17c_02`. The three CHB17 variants all return
-`chb17`; ordinary stems return their `chbNN` ID. Unrecognized stems retain the
-current behavior: preparation logs a warning and skips the file.
+EDF stem under an explicit CHB17-merge setting. It accepts ordinary stems such
+as `chb01_03` and the CHB17 stems `chb17a_03`, `chb17b_57`, and `chb17c_02`.
+The three CHB17 variants all return `chb17` when `data.merge_chb17` is true;
+with the setting absent or false they retain their existing suffixed IDs.
+Ordinary stems return their `chbNN` ID. Unrecognized stems retain the current
+behavior: preparation logs a warning and skips the file.
 
 Record cache paths and original EDF names remain unchanged. Only the
 `patient` field stored in `manifest.json` and the key used to accumulate
@@ -44,10 +52,11 @@ one mean and standard deviation pair.
 
 ### Cache invalidation and rebuild
 
-Increase `CACHE_VERSION`. Because the version participates in the record
-fingerprint, an old manifest cannot be silently reused. Without `--force`, the
-existing mismatch raises the current explicit rebuild error. With `--force`,
-the command rebuilds:
+Include `data.merge_chb17` in the record fingerprint. The dedicated LOPO
+prepared directory normally starts empty, while an old or incorrectly copied
+manifest cannot be silently reused because its fingerprint differs. Without
+`--force`, a mismatch raises the current explicit rebuild error. With
+`--force`, the command rebuilds:
 
 - `manifest.json` with canonical case IDs;
 - `normalization.npz` with one mean/std pair per canonical case;
