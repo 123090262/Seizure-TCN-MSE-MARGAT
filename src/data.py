@@ -434,7 +434,9 @@ def validate_lopo_artifacts(
         record_ids = np.asarray(catalog["record"], dtype=np.int64)
         labels = np.asarray(catalog["label"], dtype=np.int64)
     if len(record_ids) != len(labels):
-        raise ValueError("Window catalog record and label arrays must have equal length")
+        raise ValueError(
+            "Window catalog record and label arrays must have equal length"
+        )
     if np.any(record_ids < 0) or np.any(record_ids >= len(records)):
         raise ValueError("Window catalog contains an out-of-range record ID")
     if not np.isin(labels, [0, 1]).all():
