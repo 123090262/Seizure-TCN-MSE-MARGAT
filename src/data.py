@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader, Dataset
 
 LOGGER = logging.getLogger(__name__)
 CACHE_VERSION = 1
+CHB17_ALIASES = frozenset({"chb17a", "chb17b", "chb17c"})
 
 
 def find_edf_files(raw_dir: Path) -> list[Path]:
@@ -29,6 +30,15 @@ def find_edf_files(raw_dir: Path) -> list[Path]:
         for path in raw_dir.rglob("*")
         if path.is_file() and path.suffix.lower() == ".edf"
     )
+
+
+def canonical_case_id(edf_stem: str, merge_chb17: bool = False) -> str | None:
+    """Return a CHB-MIT case ID, optionally merging CHB17 filename aliases."""
+    match = re.match(r"(chb\d+[a-z]?)", edf_stem, re.IGNORECASE)
+    if not match:
+        return None
+    case_id = match.group(1).lower()
+    return "chb17" if merge_chb17 and case_id in CHB17_ALIASES else case_id
 
 
 def _merge(base: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
@@ -170,6 +180,17 @@ def _filter_signal(
     return filtfilt(b_notch, a_notch, filtered, axis=-1).astype(np.float32)
 
 
+def _record_preprocessing_settings(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "version": CACHE_VERSION,
+        "channels": data["channels"],
+        "sample_rate": data["sample_rate"],
+        "bandpass_hz": data["bandpass_hz"],
+        "notch_hz": data["notch_hz"],
+        "merge_chb17": bool(data.get("merge_chb17", False)),
+    }
+
+
 def prepare_records(config: dict[str, Any], force: bool = False) -> Path:
     """Convert EDF files once into filtered, continuous float32 record caches."""
     import mne  # EDF support is only needed during preparation.
@@ -182,13 +203,7 @@ def prepare_records(config: dict[str, Any], force: bool = False) -> Path:
     prepared.mkdir(parents=True, exist_ok=True)
     records_dir.mkdir(exist_ok=True)
 
-    preprocessing = {
-        "version": CACHE_VERSION,
-        "channels": data["channels"],
-        "sample_rate": data["sample_rate"],
-        "bandpass_hz": data["bandpass_hz"],
-        "notch_hz": data["notch_hz"],
-    }
+    preprocessing = _record_preprocessing_settings(data)
     fingerprint = _fingerprint(preprocessing)
     if manifest_path.exists() and not force:
         current = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -224,11 +239,12 @@ def prepare_records(config: dict[str, Any], force: bool = False) -> Path:
             data["bandpass_hz"][1],
             data["notch_hz"],
         )
-        patient_match = re.match(r"(chb\d+[a-z]?)", edf_path.stem, re.IGNORECASE)
-        if not patient_match:
+        patient = canonical_case_id(
+            edf_path.stem, merge_chb17=bool(data.get("merge_chb17", False))
+        )
+        if patient is None:
             LOGGER.warning("Skipping unrecognized filename: %s", edf_path.name)
             continue
-        patient = patient_match.group(1).lower()
         cache_path = records_dir / f"{edf_path.stem.lower()}.npy"
         np.save(cache_path, signal_uv)
         records.append(

@@ -1,0 +1,7 @@
+data:
+  prepared_dir: /workspace/output/prepared_lopo_24case
+  merge_chb17: true
+
+split:
+  protocol: lopo
+  val_fraction: 0.15
