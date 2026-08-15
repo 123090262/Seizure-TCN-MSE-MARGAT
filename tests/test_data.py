@@ -265,3 +265,21 @@ def test_lopo_keeps_test_patient_out_of_train_and_validation() -> None:
     assert "chb04" not in set(patients[split["train"]])
     assert "chb04" not in set(patients[split["val"]])
     assert not set(patients[split["train"]]) & set(patients[split["val"]])
+
+
+def test_all_24_lopo_folds_are_case_disjoint_and_balanced() -> None:
+    labels = np.tile(np.array([0, 0, 1], dtype=np.int64), 24 * 5)
+    patients = np.repeat(EXPECTED_LOPO_CASE_IDS, 15)
+    tested = []
+
+    for fold_id in EXPECTED_LOPO_CASE_IDS:
+        split = make_split(labels, patients, "lopo", fold_id, 42, 10, 0.15, 1.0)
+        assert set(patients[split["test"]]) == {fold_id}
+        assert fold_id not in set(patients[split["train"]])
+        assert fold_id not in set(patients[split["val"]])
+        assert not set(patients[split["train"]]) & set(patients[split["val"]])
+        for indices in split.values():
+            assert set(labels[indices]) == {0, 1}
+        tested.append(fold_id)
+
+    assert tested == list(EXPECTED_LOPO_CASE_IDS)
