@@ -51,7 +51,11 @@ def _write_lopo_artifacts(
         label=np.asarray(labels, dtype=np.uint8),
     )
     return {
-        "data": {"prepared_dir": str(prepared), "window_seconds": 2},
+        "data": {
+            "prepared_dir": str(prepared),
+            "window_seconds": 2,
+            "merge_chb17": True,
+        },
         "split": {"protocol": "lopo"},
     }
 
@@ -111,6 +115,16 @@ def test_lopo_artifacts_require_exactly_24_cases(tmp_path: Path) -> None:
     }
 
 
+def test_lopo_artifact_validation_requires_chb17_merge(tmp_path: Path) -> None:
+    config = _write_lopo_artifacts(tmp_path)
+    config["data"]["merge_chb17"] = False
+
+    with pytest.raises(ValueError) as error:
+        validate_lopo_artifacts(config, 2)
+
+    assert "data.merge_chb17=true" in str(error.value)
+
+
 @pytest.mark.parametrize(
     ("case_ids", "message"),
     [
@@ -166,6 +180,7 @@ def test_check_lopo_cli_prints_validated_summary(
     config_path.write_text(
         "data:\n"
         f"  prepared_dir: {config['data']['prepared_dir']}\n"
+        "  merge_chb17: true\n"
         "split:\n"
         "  protocol: lopo\n",
         encoding="utf-8",

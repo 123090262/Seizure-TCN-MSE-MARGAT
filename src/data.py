@@ -409,6 +409,8 @@ def validate_lopo_artifacts(
     """Validate that prepared artifacts can support all 24 case folds."""
     if config.get("split", {}).get("protocol") != "lopo":
         raise ValueError("LOPO artifact validation requires split.protocol=lopo")
+    if not config.get("data", {}).get("merge_chb17", False):
+        raise ValueError("LOPO artifact validation requires data.merge_chb17=true")
 
     prepared = Path(config["data"]["prepared_dir"])
     manifest = json.loads((prepared / "manifest.json").read_text(encoding="utf-8"))
