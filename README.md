@@ -16,6 +16,8 @@ src/evaluate.py  测试集评价
 
 本项目按已确定的方案，使用每名患者的全部记录计算归一化均值和标准差，然后再划分数据。这是 **transductive** 协议，因为验证集和测试集信号参与了归一化统计量计算。混合十折还采用窗口级分层随机划分，并允许相邻或部分重叠窗口跨集合。因此，该结果属于患者混合条件下的窗口级评价，可能偏乐观，不能证明对未见患者的泛化能力。LOPO 会完整留出测试患者，但归一化仍是 transductive。
 
+本项目的 LOPO 实验严格按 24 个 CHB-MIT case 执行。原始文件名中的 `chb17a`、`chb17b` 和 `chb17c` 仅在 LOPO 制品中统一映射为 `chb17`，最终 fold ID 为 `chb01` 至 `chb24`。PhysioNet 说明 `chb01` 与 `chb21` 来自同一位受试者，因此本文档将该协议称为 **24-case LOPO** 或 leave-one-case-out，而不把它表述为 24 位彼此独立的未见患者。
+
 发作窗口使用 75% 重叠；与发作区间重叠至少 50%时标为发作。非发作窗口与发作边界保持 30 秒距离。每个训练、验证和测试子集分别将非发作窗口下采样至约 1:1。
 
 ## 缓存设计
@@ -30,6 +32,8 @@ src/evaluate.py  测试集评价
   windows/{1,2,4}s.*   三种独立窗口索引
   splits/              协议、窗口、随机种子和折号对应的划分
 ```
+
+上述 `/workspace/output/prepared/` 保留给既有 mixed-10-fold 制品。24-case LOPO 使用独立目录 `/workspace/output/prepared_lopo_24case/`，避免重建或覆盖原 mixed manifest、归一化和窗口索引。`configs/lopo.yaml` 是唯一启用 `data.merge_chb17: true` 的配置；mixed 配置不会启用该映射，原有 mixed 划分和制品语义保持不变。
 
 滤波后的 EEG 不会重复保存三份。修改滤波、通道或窗口参数后，程序会拒绝静默复用旧缓存；确认需要重建时添加 `--force`。
 
@@ -76,11 +80,45 @@ done
 
 每折拥有独立运行目录和最长 8 小时时限；单折失败或超时不影响其他折。不要在 profiling 通过前提交上述循环。
 
-LOPO 留出 `chb01`：
+### 24-case LOPO
+
+先在独立目录重建三种窗口的 LOPO 制品：
 
 ```bash
-lab-submit pytorch 8 python -m src.train configs/base.yaml configs/lopo.yaml configs/window_2s.yaml --fold chb01
+cd /workspace/project
+/usr/bin/python -m src.data configs/base.yaml configs/lopo.yaml --prepare --windows 1 2 4
 ```
+
+正式提交训练前，必须检查所选窗口的 case、归一化和类别完整性：
+
+```bash
+/usr/bin/python -m src.data configs/base.yaml configs/lopo.yaml configs/window_2s.yaml --check-lopo --windows 2
+```
+
+只有输出同时满足以下条件时才能提交 24 个训练任务：
+
+- `case_count` 为 24；
+- `case_ids` 和 `fold_ids` 恰好为 `chb01` 至 `chb24`；
+- `normalization_arrays` 为 48；
+- 命令未报告任何 case 缺少发作或非发作窗口。
+
+LOPO 留出 `chb01` 的单折示例：
+
+```bash
+lab-submit pytorch 8 bash -lc "cd /workspace/project && /usr/bin/python -m src.train configs/base.yaml configs/lopo.yaml configs/window_2s.yaml --fold chb01"
+```
+
+24 折应作为 24 个独立调度任务提交，不要串行放进一个 8 小时任务。每折训练完成后都要显式评价 `best.pt`，保留各自的 `test_metrics.json`，最终报告 24 折逐折结果以及均值和样本标准差。
+
+### 从本机分支上传到服务器
+
+本机 Git 分支仅用于版本管理，服务器不需要存在同名分支。确认本地修改和测试后，可在项目根目录直接同步运行所需文件：
+
+```powershell
+scp -r configs src tests docs README.md requirements.txt lab-server:/workspace/project/
+```
+
+上传后先在服务器检查 `/workspace/project/src`、`configs` 和 `README.md` 位于项目根目录，且不存在额外的项目名嵌套层。不要上传本地缓存、checkpoint、`tmp/`、输出目录或虚拟环境。
 
 任务超时或中断后从持久化的 `last.pt` 恢复：
 
