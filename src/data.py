@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader, Dataset
 LOGGER = logging.getLogger(__name__)
 CACHE_VERSION = 1
 CHB17_ALIASES = frozenset({"chb17a", "chb17b", "chb17c"})
+EXPECTED_LOPO_CASE_IDS = tuple(f"chb{i:02d}" for i in range(1, 25))
 
 
 def find_edf_files(raw_dir: Path) -> list[Path]:
@@ -181,14 +182,16 @@ def _filter_signal(
 
 
 def _record_preprocessing_settings(data: dict[str, Any]) -> dict[str, Any]:
-    return {
+    settings = {
         "version": CACHE_VERSION,
         "channels": data["channels"],
         "sample_rate": data["sample_rate"],
         "bandpass_hz": data["bandpass_hz"],
         "notch_hz": data["notch_hz"],
-        "merge_chb17": bool(data.get("merge_chb17", False)),
     }
+    if data.get("merge_chb17", False):
+        settings["case_id_mapping"] = "merge-chb17-v1"
+    return settings
 
 
 def prepare_records(config: dict[str, Any], force: bool = False) -> Path:
@@ -391,6 +394,70 @@ def prepare_windows(
     return catalog_path
 
 
+def _raise_set_mismatch(name: str, actual: set[str], expected: set[str]) -> None:
+    missing = sorted(expected - actual)
+    unexpected = sorted(actual - expected)
+    if missing or unexpected:
+        raise ValueError(
+            f"LOPO {name} mismatch: missing={missing}, unexpected={unexpected}"
+        )
+
+
+def validate_lopo_artifacts(
+    config: dict[str, Any], window_seconds: float
+) -> dict[str, Any]:
+    """Validate that prepared artifacts can support all 24 case folds."""
+    if config.get("split", {}).get("protocol") != "lopo":
+        raise ValueError("LOPO artifact validation requires split.protocol=lopo")
+
+    prepared = Path(config["data"]["prepared_dir"])
+    manifest = json.loads((prepared / "manifest.json").read_text(encoding="utf-8"))
+    records = manifest["records"]
+    case_ids = {str(record["patient"]) for record in records}
+    expected_cases = set(EXPECTED_LOPO_CASE_IDS)
+    _raise_set_mismatch("case IDs", case_ids, expected_cases)
+
+    normalization_path = prepared / "normalization.npz"
+    with np.load(normalization_path) as normalization:
+        normalization_keys = set(normalization.files)
+    expected_keys = {
+        f"{case_id}_{suffix}"
+        for case_id in EXPECTED_LOPO_CASE_IDS
+        for suffix in ("mean", "std")
+    }
+    _raise_set_mismatch("normalization arrays", normalization_keys, expected_keys)
+
+    catalog_path = prepared / "windows" / f"{window_seconds:g}s.npz"
+    with np.load(catalog_path) as catalog:
+        record_ids = np.asarray(catalog["record"], dtype=np.int64)
+        labels = np.asarray(catalog["label"], dtype=np.int64)
+    if len(record_ids) != len(labels):
+        raise ValueError("Window catalog record and label arrays must have equal length")
+    if np.any(record_ids < 0) or np.any(record_ids >= len(records)):
+        raise ValueError("Window catalog contains an out-of-range record ID")
+    if not np.isin(labels, [0, 1]).all():
+        raise ValueError("Window catalog labels must be binary values 0 or 1")
+
+    counts = {case_id: [0, 0] for case_id in EXPECTED_LOPO_CASE_IDS}
+    for record_id, label in zip(record_ids, labels):
+        case_id = str(records[int(record_id)]["patient"])
+        counts[case_id][int(label)] += 1
+    for case_id, (negative, positive) in counts.items():
+        if negative == 0 or positive == 0:
+            raise ValueError(
+                f"LOPO case {case_id} lacks both window classes: "
+                f"negative={negative}, positive={positive}"
+            )
+
+    return {
+        "case_count": len(EXPECTED_LOPO_CASE_IDS),
+        "case_ids": list(EXPECTED_LOPO_CASE_IDS),
+        "normalization_arrays": len(normalization_keys),
+        "window_seconds": float(window_seconds),
+        "fold_ids": list(EXPECTED_LOPO_CASE_IDS),
+    }
+
+
 class EEGWindowDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     """Read indexed windows lazily from memory-mapped continuous records."""
 
@@ -537,16 +604,25 @@ def main() -> None:
     )
     parser.add_argument("--windows", nargs="+", type=float, default=[1, 2, 4])
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--check-lopo",
+        action="store_true",
+        help="Validate 24-case LOPO artifacts without starting training",
+    )
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
     )
-    if not args.prepare:
-        parser.error("Specify --prepare")
+    if not args.prepare and not args.check_lopo:
+        parser.error("Specify --prepare, --check-lopo, or both")
     config = load_config(args.configs)
-    prepare_records(config, args.force)
-    for seconds in args.windows:
-        prepare_windows(config, seconds, args.force)
+    if args.prepare:
+        prepare_records(config, args.force)
+        for seconds in args.windows:
+            prepare_windows(config, seconds, args.force)
+    if args.check_lopo:
+        for seconds in args.windows:
+            print(json.dumps(validate_lopo_artifacts(config, seconds), indent=2))
 
 
 if __name__ == "__main__":

@@ -1,8 +1,59 @@
+from __future__ import annotations
+
+import json
+import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
-from src.data import canonical_case_id, load_config, make_split
+from src.data import (
+    EXPECTED_LOPO_CASE_IDS,
+    _record_preprocessing_settings,
+    canonical_case_id,
+    load_config,
+    main as data_main,
+    make_split,
+    validate_lopo_artifacts,
+)
+
+
+def _write_lopo_artifacts(
+    tmp_path: Path,
+    case_ids: tuple[str, ...] = tuple(f"chb{i:02d}" for i in range(1, 25)),
+    missing_positive_case: str | None = None,
+) -> dict:
+    prepared = tmp_path / "prepared_lopo_24case"
+    windows = prepared / "windows"
+    windows.mkdir(parents=True)
+    records = [{"patient": case_id} for case_id in case_ids]
+    (prepared / "manifest.json").write_text(
+        json.dumps({"records": records}), encoding="utf-8"
+    )
+    statistics = {
+        f"{case_id}_{suffix}": np.ones(18, dtype=np.float32)
+        for case_id in case_ids
+        for suffix in ("mean", "std")
+    }
+    np.savez(prepared / "normalization.npz", **statistics)
+    record_ids = []
+    labels = []
+    for record_id, case_id in enumerate(case_ids):
+        record_ids.append(record_id)
+        labels.append(0)
+        if case_id != missing_positive_case:
+            record_ids.append(record_id)
+            labels.append(1)
+    np.savez(
+        windows / "2s.npz",
+        record=np.asarray(record_ids, dtype=np.int32),
+        start=np.zeros(len(labels), dtype=np.int64),
+        label=np.asarray(labels, dtype=np.uint8),
+    )
+    return {
+        "data": {"prepared_dir": str(prepared), "window_seconds": 2},
+        "split": {"protocol": "lopo"},
+    }
 
 
 def test_later_yaml_overrides_only_selected_values(tmp_path: Path) -> None:
@@ -19,6 +70,118 @@ def test_later_yaml_overrides_only_selected_values(tmp_path: Path) -> None:
         "data": {"window_seconds": 4, "sample_rate": 256},
         "seed": 42,
     }
+
+
+def test_mixed_preprocessing_fingerprint_inputs_remain_unchanged() -> None:
+    data = {
+        "channels": ["FP1-F7"],
+        "sample_rate": 256,
+        "bandpass_hz": [0.5, 70.0],
+        "notch_hz": 60.0,
+    }
+
+    assert _record_preprocessing_settings(data) == {
+        "version": 1,
+        "channels": ["FP1-F7"],
+        "sample_rate": 256,
+        "bandpass_hz": [0.5, 70.0],
+        "notch_hz": 60.0,
+    }
+    assert _record_preprocessing_settings({**data, "merge_chb17": True}) == {
+        "version": 1,
+        "channels": ["FP1-F7"],
+        "sample_rate": 256,
+        "bandpass_hz": [0.5, 70.0],
+        "notch_hz": 60.0,
+        "case_id_mapping": "merge-chb17-v1",
+    }
+
+
+def test_lopo_artifacts_require_exactly_24_cases(tmp_path: Path) -> None:
+    config = _write_lopo_artifacts(tmp_path)
+
+    summary = validate_lopo_artifacts(config, 2)
+
+    assert summary == {
+        "case_count": 24,
+        "case_ids": list(EXPECTED_LOPO_CASE_IDS),
+        "normalization_arrays": 48,
+        "window_seconds": 2.0,
+        "fold_ids": list(EXPECTED_LOPO_CASE_IDS),
+    }
+
+
+@pytest.mark.parametrize(
+    ("case_ids", "message"),
+    [
+        (tuple(f"chb{i:02d}" for i in range(1, 24)), "missing=['chb24']"),
+        (
+            tuple(f"chb{i:02d}" for i in range(1, 25)) + ("chb17a",),
+            "unexpected=['chb17a']",
+        ),
+    ],
+)
+def test_lopo_artifacts_report_case_set_errors(
+    tmp_path: Path, case_ids: tuple[str, ...], message: str
+) -> None:
+    config = _write_lopo_artifacts(tmp_path, case_ids)
+
+    with pytest.raises(ValueError) as error:
+        validate_lopo_artifacts(config, 2)
+
+    assert message in str(error.value)
+
+
+def test_lopo_artifacts_require_two_normalization_arrays_per_case(
+    tmp_path: Path,
+) -> None:
+    config = _write_lopo_artifacts(tmp_path)
+    normalization_path = Path(config["data"]["prepared_dir"]) / "normalization.npz"
+    with np.load(normalization_path) as archive:
+        statistics = {key: archive[key] for key in archive.files if key != "chb17_std"}
+    np.savez(normalization_path, **statistics)
+
+    with pytest.raises(ValueError) as error:
+        validate_lopo_artifacts(config, 2)
+
+    assert "missing=['chb17_std']" in str(error.value)
+
+
+def test_lopo_artifacts_require_both_classes_for_every_case(tmp_path: Path) -> None:
+    config = _write_lopo_artifacts(tmp_path, missing_positive_case="chb08")
+
+    with pytest.raises(ValueError) as error:
+        validate_lopo_artifacts(config, 2)
+
+    assert "chb08" in str(error.value)
+    assert "negative=1" in str(error.value)
+    assert "positive=0" in str(error.value)
+
+
+def test_check_lopo_cli_prints_validated_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    config = _write_lopo_artifacts(tmp_path)
+    config_path = tmp_path / "lopo.yaml"
+    config_path.write_text(
+        "data:\n"
+        f"  prepared_dir: {config['data']['prepared_dir']}\n"
+        "split:\n"
+        "  protocol: lopo\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["src.data", str(config_path), "--check-lopo", "--windows", "2"],
+    )
+
+    data_main()
+
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["case_count"] == 24
+    assert summary["normalization_arrays"] == 48
+    assert summary["fold_ids"] == list(EXPECTED_LOPO_CASE_IDS)
 
 
 def test_mixed_split_is_reproducible_disjoint_and_balanced() -> None:
