@@ -1,0 +1,14 @@
+data:
+  prepared_dir: /workspace/output/prepared_lopo_24case
+  merge_chb17: true
+
+split:
+  protocol: lopo
+  validation_strategy: mixed_windows
+  val_fraction: 0.10
+  train_negative_ratio: 2.0
+  val_negative_ratio: 1.0
+  test_negative_ratio: 1.0
+
+train:
+  threshold_metric: balanced_accuracy

@@ -114,6 +114,21 @@ lab-submit pytorch 8 bash -lc "cd /workspace/project && /usr/bin/python -m src.t
 
 24 折应作为 24 个独立调度任务提交，不要串行放进一个 8 小时任务。每折训练完成后都要显式评价 `best.pt`，保留各自的 `test_metrics.json`，最终报告 24 折逐折结果以及均值和样本标准差。
 
+### GLWA 对齐的混合验证 LOPO
+
+`configs/lopo_mixedval.yaml` 是独立的开发协议，不覆盖上述 `configs/lopo.yaml` 基线。每折仍完整留出一个测试 case；其余 23 个 case 的窗口合并后，按标签分层随机抽取 10% 作为验证集。训练和验证可能包含同一 case、同一记录甚至相邻重叠窗口，因此该验证方式弱于完整 case 留出的基线，不能描述为患者独立验证。
+
+该协议的训练集保留全部发作窗口，并最多抽取 2 倍非发作窗口；验证集和测试集保持约 1:1。最佳阈值和 checkpoint 只依据验证集 balanced accuracy 选择。它复用 `/workspace/output/prepared_lopo_24case`，不会重建或覆盖现有 mixed-10-fold 制品；新划分写入带配置指纹的独立 split 目录。
+
+先只提交 chb01 和 chb02 两个开发折：
+
+```bash
+lab-submit pytorch 8 bash -lc "cd /workspace/project && /usr/bin/python -m src.train configs/base.yaml configs/lopo_mixedval.yaml configs/window_2s.yaml --fold chb01"
+lab-submit pytorch 8 bash -lc "cd /workspace/project && /usr/bin/python -m src.train configs/base.yaml configs/lopo_mixedval.yaml configs/window_2s.yaml --fold chb02"
+```
+
+检查两个运行目录中的 `diagnostics.json`、`best.pt` 和 `test_metrics.json`，确认 specificity 与 precision 的提升并非以不可接受的 sensitivity 损失换取。冻结配置前不要提交其余 22 折。
+
 ### 从本机分支上传到服务器
 
 本机 Git 分支仅用于版本管理，服务器不需要存在同名分支。确认本地修改和测试后，可在项目根目录直接同步运行所需文件：
