@@ -337,3 +337,99 @@ def test_all_24_lopo_folds_are_case_disjoint_and_balanced() -> None:
         tested.append(fold_id)
 
     assert tested == list(EXPECTED_LOPO_CASE_IDS)
+
+
+def test_lopo_mixed_window_validation_is_stratified_reproducible_and_test_isolated() -> None:
+    patients = np.repeat(["chb01", "chb02", "chb03", "chb04"], 20)
+    labels = np.tile(np.array([0, 1], dtype=np.int64), 40)
+
+    first = make_split(
+        labels,
+        patients,
+        "lopo",
+        "chb04",
+        42,
+        10,
+        0.10,
+        1.0,
+        validation_strategy="mixed_windows",
+    )
+    second = make_split(
+        labels,
+        patients,
+        "lopo",
+        "chb04",
+        42,
+        10,
+        0.10,
+        1.0,
+        validation_strategy="mixed_windows",
+    )
+
+    assert np.array_equal(first["val"], second["val"])
+    assert len(first["val"]) == 6
+    assert np.count_nonzero(labels[first["val"]] == 0) == 3
+    assert np.count_nonzero(labels[first["val"]] == 1) == 3
+    assert set(patients[first["test"]]) == {"chb04"}
+    assert "chb04" not in set(patients[first["train"]])
+    assert "chb04" not in set(patients[first["val"]])
+    assert set(patients[first["train"]]) & set(patients[first["val"]])
+    assert not set(first["train"]) & set(first["val"])
+
+
+def test_lopo_supports_independent_negative_ratios() -> None:
+    patients = np.repeat(["chb01", "chb02", "chb03", "chb04"], 50)
+    labels = np.tile(np.array([0, 0, 0, 0, 1], dtype=np.int64), 40)
+
+    split = make_split(
+        labels,
+        patients,
+        "lopo",
+        "chb04",
+        42,
+        10,
+        0.10,
+        1.0,
+        validation_strategy="mixed_windows",
+        negative_ratios={"train": 2.0, "val": 1.0, "test": 1.0},
+    )
+
+    for name, expected_ratio in {"train": 2, "val": 1, "test": 1}.items():
+        split_labels = labels[split[name]]
+        positives = np.count_nonzero(split_labels == 1)
+        negatives = np.count_nonzero(split_labels == 0)
+        assert negatives == positives * expected_ratio
+
+
+@pytest.mark.parametrize(
+    ("validation_strategy", "negative_ratios", "message"),
+    [
+        ("unknown", None, "Unsupported LOPO validation strategy"),
+        (
+            "mixed_windows",
+            {"train": 0.0, "val": 1.0, "test": 1.0},
+            "train negative ratio",
+        ),
+    ],
+)
+def test_lopo_rejects_invalid_split_options(
+    validation_strategy: str,
+    negative_ratios: dict[str, float] | None,
+    message: str,
+) -> None:
+    labels = np.tile(np.array([0, 0, 1], dtype=np.int64), 20)
+    patients = np.repeat(["chb01", "chb02", "chb03", "chb04"], 15)
+
+    with pytest.raises(ValueError, match=message):
+        make_split(
+            labels,
+            patients,
+            "lopo",
+            "chb04",
+            42,
+            10,
+            0.10,
+            1.0,
+            validation_strategy=validation_strategy,
+            negative_ratios=negative_ratios,
+        )

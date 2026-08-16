@@ -67,6 +67,8 @@ def load_config(paths: Sequence[str | Path]) -> dict[str, Any]:
 def _balance(
     indices: np.ndarray, labels: np.ndarray, ratio: float, rng: np.random.Generator
 ) -> np.ndarray:
+    if ratio <= 0:
+        raise ValueError(f"Negative ratio must be positive, got {ratio}")
     positive = indices[labels[indices] == 1]
     negative = indices[labels[indices] == 0]
     if len(positive) == 0 or len(negative) == 0:
@@ -78,7 +80,27 @@ def _balance(
     return rng.permutation(np.concatenate([positive, chosen])).astype(np.int64)
 
 
-def make_split(
+def _class_counts(indices: np.ndarray, labels: np.ndarray) -> dict[str, int]:
+    subset = labels[indices]
+    positive = int(np.count_nonzero(subset == 1))
+    negative = int(np.count_nonzero(subset == 0))
+    return {"positive": positive, "negative": negative, "total": positive + negative}
+
+
+def _negative_ratios(
+    balance_ratio: float, ratios: dict[str, float] | None
+) -> dict[str, float]:
+    resolved = {
+        name: float((ratios or {}).get(name, balance_ratio))
+        for name in ("train", "val", "test")
+    }
+    for name, ratio in resolved.items():
+        if ratio <= 0:
+            raise ValueError(f"{name} negative ratio must be positive, got {ratio}")
+    return resolved
+
+
+def _make_split_with_summary(
     labels: np.ndarray,
     patients: np.ndarray,
     protocol: str,
@@ -87,8 +109,11 @@ def make_split(
     folds: int,
     val_fraction: float,
     balance_ratio: float,
-) -> dict[str, np.ndarray]:
-    """Create balanced mixed-window or leave-one-patient-out indices."""
+    *,
+    validation_strategy: str = "case_holdout",
+    negative_ratios: dict[str, float] | None = None,
+) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+    """Create balanced split indices and a compact reproducibility summary."""
     labels = np.asarray(labels, dtype=np.int64)
     patients = np.asarray(patients)
     if len(labels) != len(patients):
@@ -96,6 +121,7 @@ def make_split(
 
     all_indices = np.arange(len(labels))
     rng = np.random.default_rng(seed)
+    ratios = _negative_ratios(balance_ratio, negative_ratios)
     if protocol == "mixed_10fold":
         fold = int(split_id)
         if not 0 <= fold < folds:
@@ -111,28 +137,83 @@ def make_split(
     elif protocol == "lopo":
         test_patient = str(split_id)
         test = all_indices[patients == test_patient]
-        remaining_patients = np.unique(patients[patients != test_patient])
         if len(test) == 0:
             raise ValueError(f"Unknown test patient: {test_patient}")
+        remaining_patients = np.unique(patients[patients != test_patient])
         if len(remaining_patients) < 2:
             raise ValueError("LOPO requires at least three patients")
-        rng.shuffle(remaining_patients)
-        count = min(
-            len(remaining_patients) - 1,
-            max(1, round(len(remaining_patients) * val_fraction)),
-        )
-        val_patients = remaining_patients[:count]
-        val = all_indices[np.isin(patients, val_patients)]
-        train = all_indices[
-            (patients != test_patient) & ~np.isin(patients, val_patients)
-        ]
+        if validation_strategy == "mixed_windows":
+            remaining = all_indices[patients != test_patient]
+            train, val = train_test_split(
+                remaining,
+                test_size=val_fraction,
+                stratify=labels[remaining],
+                random_state=seed,
+            )
+        elif validation_strategy == "case_holdout":
+            rng.shuffle(remaining_patients)
+            count = min(
+                len(remaining_patients) - 1,
+                max(1, round(len(remaining_patients) * val_fraction)),
+            )
+            val_patients = remaining_patients[:count]
+            val = all_indices[np.isin(patients, val_patients)]
+            train = all_indices[
+                (patients != test_patient) & ~np.isin(patients, val_patients)
+            ]
+        else:
+            raise ValueError(
+                f"Unsupported LOPO validation strategy: {validation_strategy}"
+            )
     else:
         raise ValueError(f"Unsupported protocol: {protocol}")
 
-    return {
-        name: _balance(indices, labels, balance_ratio, rng)
-        for name, indices in (("train", train), ("val", val), ("test", test))
+    raw_split = {"train": train, "val": val, "test": test}
+    split = {
+        name: _balance(indices, labels, ratios[name], rng)
+        for name, indices in raw_split.items()
     }
+    summary = {
+        "validation_strategy": validation_strategy,
+        "splits": {
+            name: {
+                "case_ids": sorted({str(case_id) for case_id in patients[indices]}),
+                "pre_balance": _class_counts(indices, labels),
+                "post_balance": _class_counts(split[name], labels),
+            }
+            for name, indices in raw_split.items()
+        },
+    }
+    return split, summary
+
+
+def make_split(
+    labels: np.ndarray,
+    patients: np.ndarray,
+    protocol: str,
+    split_id: int | str,
+    seed: int,
+    folds: int,
+    val_fraction: float,
+    balance_ratio: float,
+    *,
+    validation_strategy: str = "case_holdout",
+    negative_ratios: dict[str, float] | None = None,
+) -> dict[str, np.ndarray]:
+    """Create balanced mixed-window or leave-one-case-out indices."""
+    split, _ = _make_split_with_summary(
+        labels,
+        patients,
+        protocol,
+        split_id,
+        seed,
+        folds,
+        val_fraction,
+        balance_ratio,
+        validation_strategy=validation_strategy,
+        negative_ratios=negative_ratios,
+    )
+    return split
 
 
 def _fingerprint(value: Any) -> str:
