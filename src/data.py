@@ -19,7 +19,7 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 from torch.utils.data import DataLoader, Dataset
 
 LOGGER = logging.getLogger(__name__)
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 CHB17_ALIASES = frozenset({"chb17a", "chb17b", "chb17c"})
 EXPECTED_LOPO_CASE_IDS = tuple(f"chb{i:02d}" for i in range(1, 25))
 
@@ -159,16 +159,34 @@ def _read_seizure_times(raw_dir: Path) -> dict[str, list[tuple[float, float]]]:
         blocks = re.split(r"(?=File Name\s*:)", text, flags=re.IGNORECASE)
         for block in blocks:
             name = re.search(r"File Name\s*:\s*(\S+\.edf)", block, re.IGNORECASE)
+            declared = re.search(
+                r"Number of Seizures in File\s*:\s*(\d+)", block, re.IGNORECASE
+            )
             starts = re.findall(
-                r"Seizure \d+ Start Time\s*:\s*(\d+)\s*seconds", block, re.IGNORECASE
+                r"Seizure(?:\s+\d+)?\s+Start Time\s*:\s*(\d+)\s*seconds",
+                block,
+                re.IGNORECASE,
             )
             ends = re.findall(
-                r"Seizure \d+ End Time\s*:\s*(\d+)\s*seconds", block, re.IGNORECASE
+                r"Seizure(?:\s+\d+)?\s+End Time\s*:\s*(\d+)\s*seconds",
+                block,
+                re.IGNORECASE,
             )
             if name:
-                seizures[name.group(1).lower()] = [
-                    (float(a), float(b)) for a, b in zip(starts, ends)
-                ]
+                file_name = name.group(1).lower()
+                parsed = [(float(a), float(b)) for a, b in zip(starts, ends)]
+                if len(starts) != len(ends):
+                    raise ValueError(
+                        f"{summary}: {file_name} has {len(starts)} starts "
+                        f"but {len(ends)} ends"
+                    )
+                expected = int(declared.group(1)) if declared else None
+                if expected is not None and len(parsed) != expected:
+                    raise ValueError(
+                        f"{summary}: {file_name} declares {expected} seizures "
+                        f"but parsed {len(parsed)}"
+                    )
+                seizures[file_name] = parsed
     return seizures
 
 

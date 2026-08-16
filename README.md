@@ -18,6 +18,8 @@ src/evaluate.py  测试集评价
 
 本项目的 LOPO 实验严格按 24 个 CHB-MIT case 执行。原始文件名中的 `chb17a`、`chb17b` 和 `chb17c` 仅在 LOPO 制品中统一映射为 `chb17`，最终 fold ID 为 `chb01` 至 `chb24`。PhysioNet 说明 `chb01` 与 `chb21` 来自同一位受试者，因此本文档将该协议称为 **24-case LOPO** 或 leave-one-case-out，而不把它表述为 24 位彼此独立的未见患者。
 
+发作时间解析同时支持 `Seizure Start Time` 和 `Seizure 1 Start Time` 两种官方 summary 格式，并核对每个文件声明的发作次数。缓存版本 2 之前生成的制品会遗漏无编号条目；这些旧 mixed-10-fold 结果只能作为历史结果保留，正式 corrected 实验需要重新准备数据并重新训练。
+
 发作窗口使用 75% 重叠；与发作区间重叠至少 50%时标为发作。非发作窗口与发作边界保持 30 秒距离。每个训练、验证和测试子集分别将非发作窗口下采样至约 1:1。
 
 ## 缓存设计
@@ -86,8 +88,10 @@ done
 
 ```bash
 cd /workspace/project
-/usr/bin/python -m src.data configs/base.yaml configs/lopo.yaml --prepare --windows 1 2 4
+/usr/bin/python -m src.data configs/base.yaml configs/lopo.yaml --prepare --windows 1 2 4 --force
 ```
+
+`--force` 用于覆盖缓存版本 2 之前的不完整标签制品，不需要先手动删除 prepared 目录。
 
 正式提交训练前，必须检查所选窗口的 case、归一化和类别完整性：
 

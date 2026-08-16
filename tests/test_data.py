@@ -9,6 +9,7 @@ import pytest
 
 from src.data import (
     EXPECTED_LOPO_CASE_IDS,
+    _read_seizure_times,
     _record_preprocessing_settings,
     canonical_case_id,
     load_config,
@@ -76,7 +77,7 @@ def test_later_yaml_overrides_only_selected_values(tmp_path: Path) -> None:
     }
 
 
-def test_mixed_preprocessing_fingerprint_inputs_remain_unchanged() -> None:
+def test_annotation_parser_change_invalidates_prepared_caches() -> None:
     data = {
         "channels": ["FP1-F7"],
         "sample_rate": 256,
@@ -85,20 +86,58 @@ def test_mixed_preprocessing_fingerprint_inputs_remain_unchanged() -> None:
     }
 
     assert _record_preprocessing_settings(data) == {
-        "version": 1,
+        "version": 2,
         "channels": ["FP1-F7"],
         "sample_rate": 256,
         "bandpass_hz": [0.5, 70.0],
         "notch_hz": 60.0,
     }
     assert _record_preprocessing_settings({**data, "merge_chb17": True}) == {
-        "version": 1,
+        "version": 2,
         "channels": ["FP1-F7"],
         "sample_rate": 256,
         "bandpass_hz": [0.5, 70.0],
         "notch_hz": 60.0,
         "case_id_mapping": "merge-chb17-v1",
     }
+
+
+def test_seizure_times_accept_numbered_and_unnumbered_entries(tmp_path: Path) -> None:
+    (tmp_path / "chb-summary.txt").write_text(
+        "File Name: chb01_03.edf\n"
+        "Number of Seizures in File: 1\n"
+        "Seizure Start Time: 2996 seconds\n"
+        "Seizure End Time: 3036 seconds\n"
+        "\n"
+        "File Name: chb06_04.edf\n"
+        "Number of Seizures in File: 2\n"
+        "Seizure 1 Start Time: 100 seconds\n"
+        "Seizure 1 End Time: 120 seconds\n"
+        "Seizure 2 Start Time: 200 seconds\n"
+        "Seizure 2 End Time: 240 seconds\n",
+        encoding="utf-8",
+    )
+
+    assert _read_seizure_times(tmp_path) == {
+        "chb01_03.edf": [(2996.0, 3036.0)],
+        "chb06_04.edf": [(100.0, 120.0), (200.0, 240.0)],
+    }
+
+
+def test_seizure_times_reject_incomplete_summary_entries(tmp_path: Path) -> None:
+    (tmp_path / "chb-summary.txt").write_text(
+        "File Name: chb24_01.edf\n"
+        "Number of Seizures in File: 2\n"
+        "Seizure Start Time: 480 seconds\n"
+        "Seizure End Time: 505 seconds\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as error:
+        _read_seizure_times(tmp_path)
+
+    assert "chb24_01.edf" in str(error.value)
+    assert "declares 2 seizures but parsed 1" in str(error.value)
 
 
 def test_lopo_artifacts_require_exactly_24_cases(tmp_path: Path) -> None:
