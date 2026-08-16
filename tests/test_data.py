@@ -11,6 +11,8 @@ from src.data import (
     EXPECTED_LOPO_CASE_IDS,
     _read_seizure_times,
     _record_preprocessing_settings,
+    _split_options,
+    _split_variant_name,
     canonical_case_id,
     load_config,
     main as data_main,
@@ -433,3 +435,38 @@ def test_lopo_rejects_invalid_split_options(
             validation_strategy=validation_strategy,
             negative_ratios=negative_ratios,
         )
+
+
+def test_split_options_preserve_legacy_defaults() -> None:
+    strategy, ratios = _split_options({"balance_ratio": 1.0})
+
+    assert strategy == "case_holdout"
+    assert ratios == {"train": 1.0, "val": 1.0, "test": 1.0}
+
+
+def test_mixed_validation_uses_distinct_split_variant_name() -> None:
+    baseline = _split_variant_name(
+        "lopo",
+        42,
+        {
+            "balance_ratio": 1.0,
+            "val_fraction": 0.15,
+        },
+    )
+    mixed_validation = _split_variant_name(
+        "lopo",
+        42,
+        {
+            "balance_ratio": 1.0,
+            "validation_strategy": "mixed_windows",
+            "val_fraction": 0.10,
+            "train_negative_ratio": 2.0,
+            "val_negative_ratio": 1.0,
+            "test_negative_ratio": 1.0,
+        },
+    )
+
+    assert baseline == "lopo_seed42"
+    assert mixed_validation.startswith("lopo_mixed_windows_")
+    assert mixed_validation.endswith("_seed42")
+    assert mixed_validation != baseline

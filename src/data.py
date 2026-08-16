@@ -221,6 +221,42 @@ def _fingerprint(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()[:16]
 
 
+def _split_options(split_config: dict[str, Any]) -> tuple[str, dict[str, float]]:
+    strategy = str(split_config.get("validation_strategy", "case_holdout"))
+    fallback = float(split_config["balance_ratio"])
+    ratios = {
+        "train": float(split_config.get("train_negative_ratio", fallback)),
+        "val": float(split_config.get("val_negative_ratio", fallback)),
+        "test": float(split_config.get("test_negative_ratio", fallback)),
+    }
+    return strategy, _negative_ratios(fallback, ratios)
+
+
+def _split_variant_name(
+    protocol: str, seed: int, split_config: dict[str, Any]
+) -> str:
+    strategy = str(split_config.get("validation_strategy", "case_holdout"))
+    ratio_keys = (
+        "train_negative_ratio",
+        "val_negative_ratio",
+        "test_negative_ratio",
+    )
+    if strategy == "case_holdout" and not any(
+        key in split_config for key in ratio_keys
+    ):
+        return f"{protocol}_seed{seed}"
+    relevant = {
+        key: split_config.get(key)
+        for key in (
+            "validation_strategy",
+            "val_fraction",
+            "balance_ratio",
+            *ratio_keys,
+        )
+    }
+    return f"{protocol}_{strategy}_{_fingerprint(relevant)}_seed{seed}"
+
+
 def _channel_key(name: str) -> str:
     key = name.upper().replace("EEG", "").replace(" ", "").replace("–", "-")
     return re.sub(r"-(REF|LE|AVG|0|1)$", "", key)
@@ -642,10 +678,11 @@ class InMemoryEEGWindowDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         return self.inputs[index], self.labels[index]
 
 
-def create_dataloaders(
+def _create_dataloaders(
     config: dict[str, Any], split_id: int | str
-) -> dict[str, DataLoader]:
+) -> tuple[dict[str, DataLoader], dict[str, Any]]:
     data = config["data"]
+    split_config = config["split"]
     prepared = Path(data["prepared_dir"])
     catalog_path = prepared / "windows" / f"{data['window_seconds']:g}s.npz"
     if not catalog_path.exists():
@@ -658,24 +695,30 @@ def create_dataloaders(
         [record["patient"] for record in manifest["records"]]
     )
     patients = patient_by_record[catalog["record"]]
-    split = make_split(
+    validation_strategy, negative_ratios = _split_options(split_config)
+    split, summary = _make_split_with_summary(
         catalog["label"],
         patients,
-        config["split"]["protocol"],
+        split_config["protocol"],
         split_id,
         config["seed"],
-        config["split"]["folds"],
-        config["split"]["val_fraction"],
-        config["split"]["balance_ratio"],
+        split_config["folds"],
+        split_config["val_fraction"],
+        split_config["balance_ratio"],
+        validation_strategy=validation_strategy,
+        negative_ratios=negative_ratios,
     )
     split_dir = (
         prepared
         / "splits"
         / f"{data['window_seconds']:g}s"
-        / f"{config['split']['protocol']}_seed{config['seed']}"
+        / _split_variant_name(split_config["protocol"], config["seed"], split_config)
     )
     split_dir.mkdir(parents=True, exist_ok=True)
     np.savez(split_dir / f"{split_id}.npz", **split)
+    (split_dir / f"{split_id}.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
     cache_in_memory = bool(config["train"].get("cache_in_memory", False))
     workers = 0 if cache_in_memory else int(config["train"]["num_workers"])
     datasets: dict[str, Dataset] = {}
@@ -684,7 +727,7 @@ def create_dataloaders(
         datasets[name] = (
             InMemoryEEGWindowDataset(source, name) if cache_in_memory else source
         )
-    return {
+    loaders = {
         name: DataLoader(
             dataset,
             batch_size=config["train"]["batch_size"],
@@ -695,6 +738,20 @@ def create_dataloaders(
         )
         for name, dataset in datasets.items()
     }
+    return loaders, summary
+
+
+def create_dataloaders(
+    config: dict[str, Any], split_id: int | str
+) -> dict[str, DataLoader]:
+    loaders, _ = _create_dataloaders(config, split_id)
+    return loaders
+
+
+def create_dataloaders_with_summary(
+    config: dict[str, Any], split_id: int | str
+) -> tuple[dict[str, DataLoader], dict[str, Any]]:
+    return _create_dataloaders(config, split_id)
 
 
 def main() -> None:
