@@ -22,6 +22,7 @@ LOGGER = logging.getLogger(__name__)
 CACHE_VERSION = 2
 CHB17_ALIASES = frozenset({"chb17a", "chb17b", "chb17c"})
 EXPECTED_LOPO_CASE_IDS = tuple(f"chb{i:02d}" for i in range(1, 25))
+MIXED_KFOLD_PROTOCOLS = frozenset({"mixed_5fold", "mixed_10fold", "mixed_kfold"})
 
 
 def find_edf_files(raw_dir: Path) -> list[Path]:
@@ -122,7 +123,7 @@ def _make_split_with_summary(
     all_indices = np.arange(len(labels))
     rng = np.random.default_rng(seed)
     ratios = _negative_ratios(balance_ratio, negative_ratios)
-    if protocol == "mixed_10fold":
+    if protocol in MIXED_KFOLD_PROTOCOLS:
         fold = int(split_id)
         if not 0 <= fold < folds:
             raise ValueError(f"fold must be in [0, {folds - 1}], got {fold}")

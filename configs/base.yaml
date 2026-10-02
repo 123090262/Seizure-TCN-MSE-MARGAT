@@ -32,7 +32,7 @@ data:
   constant_std_uv: 0.1
 
 split:
-  folds: 10
+  folds: 5
   val_fraction: 0.1
   balance_ratio: 1.0
 
@@ -45,11 +45,15 @@ model:
 train:
   output_dir: /workspace/output/runs
   device: cuda
-  amp: true
+  amp: false
   batch_size: 64
   cache_in_memory: true
   num_workers: 4
   learning_rate: 0.001
   weight_decay: 0.0001
-  epochs: 30
-  patience: 6
+  lr_scheduler:
+    factor: 0.5
+    patience: 2
+    min_lr: 0.00001
+  epochs: 50
+  patience: 10

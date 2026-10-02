@@ -1,8 +1,36 @@
+# Python caches and local environments
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .cache/
-tmp/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.python/
+
+# Experiment data and generated outputs
+output/
 outputs/
+runs/
+prepared/
+*.edf
 *.pt
 *.pth
+*.ckpt
+*.log
+
+# Local presentation build artifacts
+.tmp_template_render/
+.tmp_template_montage.png
+.codex-finalizer/
+tmp/
+
+# Local reference library, not part of the executable project
+文献/
+
+# Editor and OS metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

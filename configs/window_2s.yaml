@@ -1,0 +1,6 @@
+data:
+  window_seconds: 2
+model:
+  tcn_levels: 5
+train:
+  batch_size: 32

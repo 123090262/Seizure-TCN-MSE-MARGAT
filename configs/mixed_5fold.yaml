@@ -1,0 +1,3 @@
+split:
+  protocol: mixed_5fold
+  val_fraction: 0.1

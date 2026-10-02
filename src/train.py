@@ -91,6 +91,19 @@ def selection_score(metrics: dict[str, Any], metric: str) -> float:
     return float(metrics[metric])
 
 
+def build_scheduler(
+    optimizer: torch.optim.Optimizer, config: dict[str, Any]
+) -> torch.optim.lr_scheduler.ReduceLROnPlateau:
+    """Reduce learning rate when the checkpoint-selection score plateaus."""
+    return torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="max",
+        factor=float(config["factor"]),
+        patience=int(config["patience"]),
+        min_lr=float(config["min_lr"]),
+    )
+
+
 def _setup_logging(run_dir: Path) -> None:
     handlers = [
         logging.StreamHandler(),
@@ -120,7 +133,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train TCN-MSE-MARGAT")
     parser.add_argument("configs", nargs="+", type=Path)
     parser.add_argument(
-        "--fold", required=True, help="0-9 for mixed CV or patient ID for LOPO"
+        "--fold", required=True, help="fold index for mixed CV or patient ID for LOPO"
     )
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--device", choices=["cuda", "cpu"])
@@ -165,12 +178,14 @@ def main() -> None:
         lr=config["train"]["learning_rate"],
         weight_decay=config["train"]["weight_decay"],
     )
+    scheduler = build_scheduler(optimizer, config["train"]["lr_scheduler"])
     amp = bool(config["train"]["amp"] and device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=amp)
     start_epoch, best_score, best_f1, stale_epochs = 0, -1.0, -1.0, 0
     if resume:
         model.load_state_dict(resume["model"])
         optimizer.load_state_dict(resume["optimizer"])
+        scheduler.load_state_dict(resume["scheduler"])
         scaler.load_state_dict(resume["scaler"])
         start_epoch = resume["epoch"] + 1
         best_score = float(resume.get("best_score", resume.get("best_f1", -1.0)))
@@ -195,10 +210,13 @@ def main() -> None:
         best_score = max(best_score, score)
         best_f1 = max(best_f1, metrics["f1"])
         stale_epochs = 0 if improved else stale_epochs + 1
+        scheduler.step(score)
+        learning_rate = float(optimizer.param_groups[0]["lr"])
         state: dict[str, Any] = {
             "epoch": epoch,
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
             "scaler": scaler.state_dict(),
             "config": config,
             "split_id": split_id,
@@ -206,6 +224,7 @@ def main() -> None:
             "validation_metrics": metrics,
             "selection_metric": selection_metric,
             "selection_score": score,
+            "learning_rate": learning_rate,
             "best_score": best_score,
             "best_f1": best_f1,
             "stale_epochs": stale_epochs,
@@ -221,6 +240,7 @@ def main() -> None:
                 "best_epoch": epoch,
                 "selection_metric": selection_metric,
                 "selection_score": score,
+                "learning_rate": learning_rate,
                 "threshold": threshold,
                 "validation_metrics": metrics,
                 "validation_probability_summary": validation_probability_summary,
@@ -233,12 +253,13 @@ def main() -> None:
                 json.dumps(validation_probability_summary, sort_keys=True),
             )
         LOGGER.info(
-            "epoch=%d loss=%.4f val_%s=%.4f threshold=%.6f",
+            "epoch=%d loss=%.4f val_%s=%.4f threshold=%.6f lr=%.8f",
             epoch,
             train_loss,
             selection_metric,
             score,
             threshold,
+            learning_rate,
         )
         if stale_epochs >= int(config["train"]["patience"]):
             LOGGER.info("Early stopping after %d stale epochs", stale_epochs)

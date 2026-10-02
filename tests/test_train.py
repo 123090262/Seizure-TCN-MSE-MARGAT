@@ -3,7 +3,13 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.train import probability_summary, seed_everything, selection_score, train_epoch
+from src.train import (
+    build_scheduler,
+    probability_summary,
+    seed_everything,
+    selection_score,
+    train_epoch,
+)
 
 
 def test_seed_everything_repeats_numpy_and_torch_draws() -> None:
@@ -57,3 +63,17 @@ def test_selection_score_uses_configured_metric() -> None:
 def test_selection_score_rejects_unknown_metric() -> None:
     with pytest.raises(ValueError, match="Unsupported selection metric"):
         selection_score({"f1": 0.81}, "accuracy")
+
+
+def test_plateau_scheduler_reduces_learning_rate_after_configured_patience() -> None:
+    model = torch.nn.Linear(2, 1)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+    scheduler = build_scheduler(
+        optimizer,
+        {"factor": 0.5, "patience": 2, "min_lr": 1e-5},
+    )
+
+    for score in (0.8, 0.8, 0.8, 0.8):
+        scheduler.step(score)
+
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(0.0005)

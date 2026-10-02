@@ -258,6 +258,17 @@ def test_mixed_split_is_reproducible_disjoint_and_balanced() -> None:
     assert not set(first["val"]) & set(first["test"])
 
 
+def test_mixed_5fold_protocol_uses_configured_fold_count() -> None:
+    labels = np.array([0] * 100 + [1] * 20, dtype=np.int64)
+    patients = np.array([f"chb{i % 10:02d}" for i in range(120)])
+
+    split = make_split(labels, patients, "mixed_5fold", 4, 42, 5, 0.1, 1.0)
+
+    assert set(split) == {"train", "val", "test"}
+    with pytest.raises(ValueError, match=r"fold must be in \[0, 4\], got 5"):
+        make_split(labels, patients, "mixed_5fold", 5, 42, 5, 0.1, 1.0)
+
+
 def test_mixed_fold_zero_indices_are_unchanged() -> None:
     labels = np.array([0] * 100 + [1] * 20, dtype=np.int64)
     patients = np.array([f"chb{i % 10:02d}" for i in range(120)])
