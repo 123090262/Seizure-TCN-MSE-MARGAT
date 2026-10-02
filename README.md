@@ -5,6 +5,44 @@ scalp EEG. The proposed model combines a strong TCN expert, an adaptive
 multi-scale encoder (MSE), and a montage-aware residual graph attention module
 (MARGAT).
 
+<table>
+  <tr>
+    <td align="center"><strong>98.12%</strong><br>Mixed 5-fold Accuracy</td>
+    <td align="center"><strong>88.65%</strong><br>Leave-one-case-out Accuracy</td>
+  </tr>
+</table>
+
+> Final research-report summary. Mixed five-fold evaluation uses pooled
+> window-level splits, while leave-one-case-out evaluation holds out an entire
+> CHB-MIT case. The protocols measure different generalization settings and
+> should not be compared as if they used the same split difficulty.
+
+## Research highlights
+
+- End-to-end workflow from EDF parsing and artifact-aware preprocessing to
+  model training, subject-wise evaluation, and visual analysis.
+- Multi-scale temporal convolutions capture seizure patterns at different
+  durations; adaptive channel encoders preserve lead-specific information.
+- Montage-aware graph attention combines bipolar topology, lead orientation,
+  and dynamic EEG correlations.
+- Evaluation includes Accuracy, Sensitivity, Specificity, Precision, F1,
+  AUROC, and AUPRC under mixed cross-validation and leave-one-case-out setups.
+
+## Model overview
+
+![TCN-MSE-MARGAT model architecture](docs/assets/model-architecture.png)
+
+The report-stage diagram summarizes the temporal branch, adaptive multi-scale
+encoder, montage-aware graph attention, and gated residual fusion. The source
+modules under `src/models/` provide the executable implementation.
+
+## Visual analysis
+
+<p align="center">
+  <img src="docs/assets/attention-visualization.png" width="49%" alt="Temporal attention around seizure onset">
+  <img src="docs/assets/feature-visualization.png" width="49%" alt="PCA visualization of temporal, graph correction, and fused features">
+</p>
+
 ## Project relationship and data
 
 This repository is parallel to `../Seizure-Detection`. It keeps its own source,
